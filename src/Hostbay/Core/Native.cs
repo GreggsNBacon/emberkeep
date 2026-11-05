@@ -1,6 +1,7 @@
 using System;
 using System.Collections.Generic;
 using System.Diagnostics;
+using System.IO;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
@@ -8,7 +9,7 @@ using System.Threading;
 namespace Hostbay.Core;
 
 /// <summary>Win32 helpers: Ctrl+C delivery, process tree enumeration and image paths.</summary>
-internal static class Native
+public static class Native
 {
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool AttachConsole(uint pid);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool FreeConsole();
@@ -116,6 +117,49 @@ internal static class Native
             return QueryFullProcessImageNameW(h, 0, sb, ref size) ? sb.ToString(0, size) : null;
         }
         finally { CloseHandle(h); }
+    }
+
+    [DllImport("ntdll.dll")] private static extern int NtQueryInformationProcess(IntPtr h, int infoClass, IntPtr buffer, int length, out int returnLength);
+
+    /// <summary>The full command line another process was started with (Windows 8.1+), or null if it can't be read.</summary>
+    public static string? CommandLine(int pid)
+    {
+        var h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
+        if (h == IntPtr.Zero) return null;
+        try
+        {
+            NtQueryInformationProcess(h, 60 /* ProcessCommandLineInformation */, IntPtr.Zero, 0, out int needed);
+            if (needed <= 0 || needed > 1 << 20) return null;
+            var buf = Marshal.AllocHGlobal(needed);
+            try
+            {
+                if (NtQueryInformationProcess(h, 60, buf, needed, out _) != 0) return null;
+                // UNICODE_STRING { ushort Length; ushort MaximumLength; (pad) IntPtr Buffer; }
+                int bytes = Marshal.ReadInt16(buf) & 0xFFFF;
+                var text = Marshal.ReadIntPtr(buf, IntPtr.Size);
+                return text == IntPtr.Zero ? null : Marshal.PtrToStringUni(text, bytes / 2);
+            }
+            finally { Marshal.FreeHGlobal(buf); }
+        }
+        finally { CloseHandle(h); }
+    }
+
+    /// <summary>True if the exe is a windowed (GUI) program rather than a console one, read from its PE header.</summary>
+    public static bool? IsGuiExe(string path)
+    {
+        try
+        {
+            using var fs = File.OpenRead(path);
+            using var r = new BinaryReader(fs);
+            if (r.ReadUInt16() != 0x5A4D) return null; // "MZ"
+            fs.Position = 0x3C;
+            int pe = r.ReadInt32();
+            fs.Position = pe;
+            if (r.ReadUInt32() != 0x00004550) return null; // "PE\0\0"
+            fs.Position = pe + 24 + 68; // optional header → Subsystem (same offset for PE32 and PE32+)
+            return r.ReadUInt16() switch { 2 => true, 3 => false, _ => null };
+        }
+        catch { return null; }
     }
 
     public static void KillTree(int pid)

@@ -66,6 +66,8 @@ public static class JoinInfo
                 var id = File.Exists(P("GameID.txt")) ? File.ReadAllText(P("GameID.txt")).Trim() : null;
                 return new(null, null, string.IsNullOrEmpty(id) ? null : id, "Game ID");
             }
+            case "ace":
+                return Json(P(Path.Combine(ArgBlobs.Folder, "serverconfig.json")), "server_tcp_listener_port", "serverconfig.json") ?? Default(9700);
             case "rust":
                 return Arg(args, @"\+server\.port\s+(\d+)") ?? Default(28015);
             default:
@@ -160,6 +162,10 @@ public static class JoinInfo
                 Add("Query", "UDP", 27015, Arg(args, @"-QueryPort=(\d+)"), Ini(engine, "GameServerQueryPort", "Engine.ini"));
                 break;
             }
+            case "ace":
+                Add("Game", "TCP", 9700, Json(P(Path.Combine(ArgBlobs.Folder, "serverconfig.json")), "server_tcp_listener_port", "serverconfig.json"));
+                Add("Game", "UDP", 9700, Json(P(Path.Combine(ArgBlobs.Folder, "serverconfig.json")), "server_udp_listener_port", "serverconfig.json"));
+                break;
             case "rust":
                 Add("Game", "UDP", 28015, Arg(args, @"\+server\.port\s+(\d+)"));
                 Add("Query", "UDP", 28017, Arg(args, @"\+server\.queryport\s+(\d+)"));

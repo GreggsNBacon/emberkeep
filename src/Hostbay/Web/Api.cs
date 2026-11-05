@@ -113,6 +113,7 @@ public static class Api
                 next.Executable = body.Executable;
                 next.Arguments = body.Arguments;
                 next.WorkingDirectory = body.WorkingDirectory;
+                next.Launcher = body.Launcher ?? "";
                 next.Environment = body.Environment ?? new();
                 next.ExtraLogFiles = body.ExtraLogFiles ?? new();
                 next.SteamAppId = body.SteamAppId;
@@ -120,6 +121,24 @@ public static class Api
             mgr.Update(id, next);
             return Results.Ok(Detail(rt, p));
         }).See();
+
+        // ---------- learn from launcher (launch permission: it opens programs and sets what runs) ----------
+
+        api.MapGet("/servers/{id}/learn", (string id) => Results.Ok(host.Learn.Status(id))).Need(Permissions.Launch);
+
+        api.MapPost("/servers/{id}/learn", (string id) =>
+        {
+            try { host.Learn.Start(id); return Results.Ok(host.Learn.Status(id)); }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
+        api.MapPost("/servers/{id}/learn/apply", (string id, HttpContext ctx) =>
+        {
+            try { host.Learn.Apply(id); return Results.Ok(Detail(mgr.Get(id)!, WebHost.Who(ctx))); }
+            catch (Exception ex) when (ex is InvalidOperationException or IOException or UnauthorizedAccessException) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
+        api.MapDelete("/servers/{id}/learn", (string id) => { host.Learn.Cancel(id); return Results.Ok(); }).Need(Permissions.Launch);
 
         api.MapDelete("/servers/{id}", (string id) =>
         {
@@ -641,6 +660,10 @@ public static class Api
             remoteConsole = rc == null ? null : new { rc.Host, rc.Port, hasPassword = rc.Password.Length > 0 },
             logFiles = canLaunch ? rt.LogFilePatterns() : Enumerable.Empty<string>(),
             join = JoinInfo.Resolve(rt.Config),
+            launcherFound = LauncherLearn.LauncherPath(rt.Config) != null,
+            // A game set up through its own launcher that Hostbay hasn't learned yet.
+            needsLearn = canLaunch && LauncherLearn.LauncherPath(rt.Config) != null && GameCatalog.Get(rt.Config.GameId).Launcher != null
+                && !ArgBlobs.HasPlaceholders(rt.Config.Arguments) && string.IsNullOrWhiteSpace(rt.Config.Arguments),
         };
     }
 

@@ -30,6 +30,8 @@ public sealed class ServerInstance
     public string Arguments { get; set; } = "";
     /// <summary>Optional; defaults to the install dir.</summary>
     public string WorkingDirectory { get; set; } = "";
+    /// <summary>The game's own setup program (e.g. a "Server Launcher"), relative to the install dir. Used by "Learn from launcher".</summary>
+    public string Launcher { get; set; } = "";
     public Dictionary<string, string> Environment { get; set; } = new();
     public bool AutoRestart { get; set; }
     public CommandChannel CommandChannel { get; set; } = CommandChannel.None;

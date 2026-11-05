@@ -560,3 +560,4 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .acct-add.discord-token { grid-template-columns: 1fr auto; max-width: 620px; }
 .ext-link, .set-row .help a { color: var(--brand-2); }
 .ext-link:hover { text-decoration: underline; }
+.with-btn > .with-btn { flex: 1; min-width: 0; }

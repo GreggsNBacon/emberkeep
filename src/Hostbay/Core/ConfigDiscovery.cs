@@ -37,6 +37,10 @@ public static class ConfigDiscovery
                 Add(found, path, s.InstallDir, known: true);
         }
 
+        // JSON files that the launch arguments pass encoded (see ArgBlobs) are this server's main config.
+        foreach (var path in ArgBlobs.PlaceholderFiles(s.Arguments, s.InstallDir))
+            if (File.Exists(path)) Add(found, path, s.InstallDir, known: true);
+
         if (Directory.Exists(s.InstallDir))
         {
             foreach (var path in HeuristicScan(s.InstallDir, depth: 0, maxDepth: 5, budget: new int[] { 4000 }))

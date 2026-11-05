@@ -543,6 +543,10 @@ function renderHeader() {
   } else if (state.detail && !state.detail.installDirExists) {
     n.classList.add('warn'); n.hidden = false;
     n.append(h('span', {}, `The server folder can't be found: ${s.installDir}`));
+  } else if (state.detail?.needsLearn && s.state === 'Stopped') {
+    n.hidden = false;
+    n.append(h('span', {}, `${g.name} servers are set up in the game's own launcher. Set it up there once and Hostbay will copy the settings.`),
+      h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => learnDialog(s.id) }, 'Learn from launcher'));
   }
 
   // Command box availability
@@ -1290,6 +1294,16 @@ function renderSettings() {
     h('div', { class: 'set-rows' },
       row('Executable', withBrowse(exeInput, { title: 'Choose the server program', files: true, relative: true }),
         d.resolvedExecutable && d.resolvedExecutable !== c.executable ? `Runs ${d.resolvedExecutable}` : null),
+      row('Launcher', h('div', { class: 'with-btn' },
+        withBrowse(text('launcher', { mono: true, placeholder: 'Optional: the game\'s own server launcher or configurator' }), { title: 'Choose the game\'s launcher', files: true, relative: true }),
+        h('button', { class: 'btn', type: 'button', onclick: async () => {
+          // Learning uses the saved launcher, so save a changed one first.
+          if ((c.launcher || '') !== (d.config.launcher || '')) {
+            try { state.detail = await api('PUT', `/api/servers/${c.id}`, c); } catch (err) { toast(err.message, 'bad'); return; }
+          }
+          learnDialog(c.id);
+        } }, 'Learn from launcher')),
+        'If the game sets its server up in its own program, Hostbay can open it, see how it starts the server and copy those settings.'),
       row('Launch arguments', (() => { const t = h('textarea', { class: 'input mono', rows: 3, spellcheck: 'false' }); t.value = c.arguments || ''; t.addEventListener('input', () => c.arguments = t.value); return t; })(),
         g.defaultArguments ? h('span', {}, 'Default: ', h('code', { class: 'mono-path' }, g.defaultArguments)) : null),
       row('Working folder', text('workingDirectory', { mono: true, placeholder: 'Same as the server folder' })),
@@ -1469,6 +1483,82 @@ function folderPanel(panel, m) {
     } }, 'Browse')),
     result);
   path.style.flex = '1';
+}
+
+// ---------------- learn from launcher ----------------
+
+// Opens the game's own launcher, waits for it to start the server, then offers to use the same program and arguments.
+async function learnDialog(id) {
+  const name = state.servers.find(s => s.id === id)?.name || 'the server';
+  const body = h('div', { class: 'field-stack' });
+  let st = null, timer = null, closed = false;
+  const foot = h('div', { class: 'row gap', style: { width: '100%' } });
+  const m = openModal({ title: `Learn from launcher: ${name}`, body, foot: [foot],
+    onClose: () => { closed = true; clearTimeout(timer); } }); // keeps watching: reopen to see what it learned
+  m.modal.classList.add('wide');
+
+  const poll = async () => {
+    if (closed) return;
+    try { st = await api('GET', `/api/servers/${id}/learn`); } catch (e) { toast(e.message, 'bad'); return; }
+    draw();
+    if (st.state === 'waiting') timer = setTimeout(poll, 1000);
+  };
+  const start = async () => {
+    try { st = await api('POST', `/api/servers/${id}/learn`); draw(); timer = setTimeout(poll, 1000); }
+    catch (e) { toast(e.message, 'bad'); }
+  };
+  const apply = async () => {
+    try {
+      state.detail = await api('POST', `/api/servers/${id}/learn/apply`);
+      toast('Launch settings learned. Hostbay can now start this server itself.', 'good');
+      m.close(); closed = true;
+      state.configs = null;
+      if (state.selectedId === id) { renderSettings(); renderHeader(); renderJoin(); renderPorts(true); }
+    } catch (e) { toast(e.message, 'bad'); }
+  };
+
+  function draw() {
+    body.replaceChildren(); foot.replaceChildren();
+    const launcher = st?.launcher || state.detail?.config?.launcher || 'the launcher';
+    if (!st || st.state === 'idle') {
+      body.append(
+        h('p', {}, 'Some games set up their server in their own program. Hostbay can watch that program start the server and copy exactly how it did it.'),
+        h('ol', { class: 'steps' },
+          h('li', {}, 'Hostbay opens ', h('code', {}, launcher), '.'),
+          h('li', {}, 'Set the server up there as usual, then press its ', h('b', {}, 'Run'), ' or ', h('b', {}, 'Start'), ' button.'),
+          h('li', {}, 'Hostbay sees the server start and shows you what it learned. You can close the launcher afterwards.')),
+        h('div', { class: 'dim', style: { fontSize: '12.5px' } }, 'Settings the launcher passes inside the command line are saved as files you can edit in Config files.'));
+      foot.append(h('span', { class: 'spacer' }), h('button', { class: 'btn btn-primary', type: 'button', onclick: start }, `Open ${launcher}`));
+      return;
+    }
+    if (st.state === 'waiting') {
+      body.append(h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, h('span', { class: 'dot-status wait' }), h('span', {}, st.message)),
+        h('p', { class: 'dim' }, 'Set the server up in the launcher and press its Run or Start button. This window updates by itself.'));
+      foot.append(h('span', { class: 'spacer' }), h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { api('DELETE', `/api/servers/${id}/learn`).catch(() => {}); m.close(); } }, 'Stop watching'));
+      return;
+    }
+    if (st.state === 'captured') {
+      body.append(
+        h('div', { style: { display: 'flex', alignItems: 'center', gap: '10px' } }, h('span', { class: 'dot-status on' }), h('span', {}, st.message)),
+        h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Program'), h('code', { class: 'mono-path', style: { paddingTop: '7px' } }, st.executable)),
+          h('div', { class: 'set-row' }, h('label', {}, 'Arguments'), h('code', { class: 'mono-path', style: { paddingTop: '7px', whiteSpace: 'normal', wordBreak: 'break-all' } }, st.arguments || '(none)')),
+          st.files.length ? h('div', { class: 'set-row' }, h('label', {}, 'Settings files'),
+            h('div', {}, ...st.files.map(f => h('div', { style: { padding: '4px 0' } },
+              h('code', {}, f.path), h('span', { class: 'dim' }, ` ${f.flag ? `from ${f.flag}` : ''}, ${(f.bytes / 1024).toFixed(1)} KB`),
+              f.keys.length ? h('div', { class: 'help' }, f.keys.join(', ') + (f.keys.length >= 12 ? ', …' : '')) : null)))) : null),
+        h('p', { class: 'dim' }, 'The server the launcher started keeps running and now shows in Hostbay. Using these settings replaces this server\'s executable and arguments.'));
+      foot.append(h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => { st = null; draw(); } }, 'Try again'),
+        h('span', { class: 'spacer' }), h('button', { class: 'btn btn-primary', type: 'button', onclick: apply }, 'Use these settings'));
+      return;
+    }
+    body.append(h('div', { class: 'notice warn' }, st.message));
+    foot.append(h('span', { class: 'spacer' }), h('button', { class: 'btn btn-primary', type: 'button', onclick: start }, 'Open it again'));
+  }
+  // Pick up a session that's already running (e.g. the dialog was closed and reopened).
+  try { st = await api('GET', `/api/servers/${id}/learn`); } catch { }
+  draw();
+  if (st?.state === 'waiting') timer = setTimeout(poll, 1000);
 }
 
 // ---------------- Steam game picker (artwork) ----------------

@@ -27,6 +27,7 @@ public sealed class WebHost
         Auth = new AuthService(mgr);
         Ports = new RouterPortService(mgr);
         Discord = new DiscordBot(mgr);
+        Learn = new LauncherLearn(mgr);
     }
 
     public AuthService Auth { get; }
@@ -36,6 +37,8 @@ public sealed class WebHost
     public RouterPortService Ports { get; }
     /// <summary>Optional Discord bot that shares server status and join addresses.</summary>
     public DiscordBot Discord { get; }
+    /// <summary>"Learn from launcher": captures how a game's own launcher starts its server.</summary>
+    public LauncherLearn Learn { get; }
     public int Port { get; private set; }
     public bool ListeningOnLan { get; private set; }
     public string LocalUrl => $"http://127.0.0.1:{Port}";

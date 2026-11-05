@@ -98,10 +98,15 @@ public sealed class ServerRuntime
             var wd = ResolveWorkingDirectory();
             if (!Directory.Exists(wd)) { Fail($"Working directory not found: {wd}"); return; }
 
+            // Settings kept in files and passed encoded on the command line (see ArgBlobs), e.g. Assetto Corsa EVO.
+            string args;
+            try { args = ArgBlobs.Expand(Config.Arguments ?? "", Config.InstallDir); }
+            catch (InvalidOperationException ex) { Fail(ex.Message); return; }
+
             var psi = new ProcessStartInfo
             {
                 FileName = exe,
-                Arguments = Config.Arguments ?? "",
+                Arguments = args,
                 WorkingDirectory = wd,
                 UseShellExecute = false,
                 CreateNoWindow = true,

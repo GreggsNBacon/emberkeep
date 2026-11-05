@@ -16,10 +16,11 @@ A Windows app for running game servers for you and your friends. Run `Hostbay.ex
 - **Opens router ports with PortHop.** Each server has a Router ports control next to its join address: open or close the ports friends need, with per-port status. Hostbay asks PortHop to do it (starting PortHop in the background if needed), so every forward also shows in PortHop's list and tray and is restored after a router reboot. Without PortHop, Hostbay forwards with its own UPnP. Port lists start from PortHop's game list and follow the ports actually set in the server's config files and launch arguments (for example Enshrouded's gamePort and queryPort, Minecraft's server-port and query.port, or ARK's ?Port and ?QueryPort). Admin ports such as RCON are never opened. You can also type your own list per server; an optional switch opens them while the server runs. The installer includes PortHop, which also works on its own.
 - **Shows join addresses.** Each server shows the address friends join with (your public IP by default, plus the right port, read from the launch arguments or game config), with Copy buttons for local network, VPN and public addresses. IP settings in config files get a "Fill current IP" button. App settings lists all of this PC's addresses with Copy buttons.
 - **Picks up running servers.** If a server was already running when Hostbay started, Hostbay detects it and can stop it and show its log files.
+- **Learns from a game's own launcher.** Some games set their server up in their own program (Assetto Corsa EVO's Server Launcher, for example). Under Settings → Launch → Launcher, "Learn from launcher" opens that program, waits for it to start the server, and reads the exact program and command line it used, so Hostbay can then run the server itself. Settings passed encoded inside the command line (Base64, zlib, gzip or a length prefix plus zlib) are saved as JSON files in `HostbayConfig`. They show up in Config files and are encoded again each time the server starts. Hostbay spots a launcher in a server folder on its own: a windowed program next to the console server with a name like "launcher" or "config".
 
 ## Supported games
 
-Palworld, Enshrouded, Valheim, Satisfactory, Minecraft (Java and Bedrock), V Rising, 7 Days to Die, Project Zomboid, Terraria, ARK: Survival Evolved, ARK: Survival Ascended, Sons of the Forest, Conan Exiles, Core Keeper and Rust. Any other server can be added as **Other / Custom**: you choose the executable, and Hostbay captures its console and finds config-looking files in its folder.
+Palworld, Enshrouded, Valheim, Satisfactory, Minecraft (Java and Bedrock), V Rising, 7 Days to Die, Project Zomboid, Terraria, ARK: Survival Evolved, ARK: Survival Ascended, Sons of the Forest, Conan Exiles, Core Keeper, Rust and Assetto Corsa EVO (set it up once in its Server Launcher, then use Learn from launcher). Any other server can be added as **Other / Custom**: you choose the executable, and Hostbay captures its console and finds config-looking files in its folder.
 
 Game definitions live in `src/Hostbay/Core/GameCatalog.cs`. Adding a game means adding one entry there.
 
@@ -63,6 +64,7 @@ The installer's source is in `installer/`. `Package.wxs` defines the package. Th
 - **`tests/FakeServer`**: a stand-in game server (console output, a log file, console input, Ctrl+C handling, an RCON server) used to exercise Hostbay without installing real games.
 - **`tests/FakeDiscord`**: a stand-in for Discord's REST API and gateway, used to test the bot without a real token (`HOSTBAY_DISCORD_API=http://127.0.0.1:9555/api/v10`).
 - **`tests/Checks`**: quick checks of name tidying, router ports read from config files and launch arguments, and (with `--online`) the Steam art lookup. Run with `dotnet run --project testsChecks`.
+- **`tests/FakeLauncher`**: a windowed stand-in for a game's launcher that starts `FakeServer` with Assetto Corsa EVO-style encoded settings, used to test Learn from launcher.
 
 ## PortHop
 

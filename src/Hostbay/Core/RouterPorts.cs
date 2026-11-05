@@ -29,7 +29,7 @@ public static class RouterPorts
         ["palworld"] = 8211, ["enshrouded"] = 15637, ["valheim"] = 2456, ["satisfactory"] = 7777,
         ["minecraft-java"] = 25565, ["minecraft-bedrock"] = 19132, ["vrising"] = 9876, ["7dtd"] = 26900,
         ["zomboid"] = 16261, ["terraria"] = 7777, ["ark-se"] = 7777, ["ark-sa"] = 7777, ["sotf"] = 8766,
-        ["conan"] = 7777, ["rust"] = 28015,
+        ["conan"] = 7777, ["rust"] = 28015, ["ace"] = 9700,
     };
 
     /// <summary>Parses "UDP 2456-2458, TCP 8888". Accepts TCP, UDP, TCP/UDP or BOTH. Throws FormatException with a readable message.</summary>
@@ -112,13 +112,36 @@ public static class RouterPorts
                 if (!moved.Contains(k) && entries[k].From <= d.Default && d.Default <= entries[k].To && ProtoCovers(entries[k].Protocol, d.Protocol)) { i = k; break; }
             if (i >= 0 && entries[i].From + delta >= 1 && entries[i].To + delta <= 65535)
             {
-                entries[i] = entries[i] with { From = entries[i].From + delta, To = entries[i].To + delta };
+                var e = entries[i];
+                if (e.Protocol == "TCP/UDP")
+                {
+                    // Only this protocol moves; the other keeps its range until its own setting is applied.
+                    entries.Add(e with { Protocol = d.Protocol == "TCP" ? "UDP" : "TCP" });
+                    e = e with { Protocol = d.Protocol };
+                }
+                entries[i] = e with { From = e.From + delta, To = e.To + delta };
                 moved.Add(i);
             }
             else { entries.Add(new PortEntry(d.Protocol, d.Port, d.Port)); moved.Add(entries.Count - 1); sources.Add(d.Source); } // not in the usual list, e.g. Minecraft's query port
         }
         var from = sources.Where(x => x.Length > 0).Distinct().ToList();
-        return (entries, from.Count > 0 ? $"{game.Name}'s ports, as set in {string.Join(" and ", from)}" : $"{game.Name}'s usual ports");
+        return (MergeProtocols(entries), from.Count > 0 ? $"{game.Name}'s ports, as set in {string.Join(" and ", from)}" : $"{game.Name}'s usual ports");
+    }
+
+    /// <summary>"TCP 7780" and "UDP 7780" become "TCP/UDP 7780" again.</summary>
+    private static List<PortEntry> MergeProtocols(List<PortEntry> entries)
+    {
+        var result = new List<PortEntry>(entries);
+        for (int a = 0; a < result.Count; a++)
+            for (int b = result.Count - 1; b > a; b--)
+                if (result[a].From == result[b].From && result[a].To == result[b].To
+                    && ((result[a].Protocol, result[b].Protocol) is ("TCP", "UDP") or ("UDP", "TCP")))
+                {
+                    result[a] = result[a] with { Protocol = "TCP/UDP" };
+                    result.RemoveAt(b);
+                }
+        // Exact duplicates (e.g. a protocol split that didn't move) collapse too.
+        return result.Distinct().ToList();
     }
 
     private static bool ProtoCovers(string entryProto, string proto) => entryProto == "TCP/UDP" || entryProto == proto;

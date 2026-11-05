@@ -10,8 +10,12 @@ namespace Hostbay;
 
 internal static class Program
 {
-    private const string MutexName = "Hostbay.SingleInstance.v1";
-    public const string ShowEventName = "Hostbay.ShowWindow.v1";
+    // One Hostbay per data folder: the normal install shares one name; a copy pointed at another folder (HOSTBAY_DATA_DIR, used
+    // for testing) runs alongside it instead of just showing the installed one.
+    private static readonly string InstanceSuffix = Environment.GetEnvironmentVariable("HOSTBAY_DATA_DIR") is { Length: > 0 } d
+        ? "." + Convert.ToHexString(System.Security.Cryptography.SHA256.HashData(System.Text.Encoding.UTF8.GetBytes(d.ToLowerInvariant())))[..12] : "";
+    private static readonly string MutexName = "Hostbay.SingleInstance.v1" + InstanceSuffix;
+    public static readonly string ShowEventName = "Hostbay.ShowWindow.v1" + InstanceSuffix;
 
     [STAThread]
     private static void Main(string[] args)

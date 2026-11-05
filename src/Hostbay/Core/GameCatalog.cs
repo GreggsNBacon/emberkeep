@@ -25,6 +25,8 @@ public sealed class GameDefinition
     public int? ArtAppId { get; init; }
     /// <summary>Candidate executables relative to the install dir; the first that exists is used.</summary>
     public string[] Executables { get; init; } = [];
+    /// <summary>The game's own setup program, if it has one, relative to the install dir.</summary>
+    public string? Launcher { get; init; }
     public string DefaultArguments { get; init; } = "";
     public Dictionary<string, string> Environment { get; init; } = new();
     /// <summary>Relative paths; if any exists in a folder, the folder is treated as this game.</summary>
@@ -343,6 +345,21 @@ public static class GameCatalog
         },
         new()
         {
+            // The server takes its whole setup on the command line as compressed JSON, built by the game's Server Launcher.
+            // "Learn from launcher" captures it once; Hostbay then keeps it in HostbayConfig\*.json and re-encodes it on start.
+            Id = "ace", Name = "Assetto Corsa EVO", Badge = "AC", Color = "#d6332f",
+            ForwardPorts = "TCP/UDP 9700",
+            ArtAppId = 3058630,
+            SteamAppIds = [4564210],
+            Executables = ["AssettoCorsaEVOServer.exe"],
+            Launcher = "ServerLauncher.exe",
+            DetectFiles = ["AssettoCorsaEVOServer.exe"],
+            ConfigFiles = ["HostbayConfig\\serverconfig.json", "HostbayConfig\\seasondefinition.json"],
+            Commands = CommandChannel.None, Stop = StopMethod.CtrlC,
+            Notes = "Set the server up once in Assetto Corsa EVO's Server Launcher, then use Learn from launcher (Settings → Launch). After that Hostbay runs it directly, and you can edit serverconfig.json and seasondefinition.json in Config files.",
+        },
+        new()
+        {
             Id = "generic", Name = "Other / Custom", Badge = "··", Color = "#8a94a6",
             Commands = CommandChannel.Stdin, Stop = StopMethod.CtrlC,
             Notes = "A custom server. Hostbay runs the executable you choose, captures its console output, and finds config-looking files in its folder.",
@@ -392,16 +409,27 @@ public static class GameCatalog
             var (mExe, mArgs) = MinecraftJava.DefaultLaunch(installDir);
             exe = mExe; inst.Arguments = mArgs;
         }
+        var exes = Directory.Exists(installDir) ? Directory.EnumerateFiles(installDir, "*.exe").ToList() : new List<string>();
         if (string.IsNullOrEmpty(exe) && g.Id == "generic")
         {
-            exe = Directory.Exists(installDir)
-                ? Directory.EnumerateFiles(installDir, "*.exe").Select(Path.GetFileName)
-                    .OrderByDescending(n => n!.Contains("server", StringComparison.OrdinalIgnoreCase)).FirstOrDefault()
-                : null;
+            // Prefer console programs (servers) over windowed ones (launchers, configurators), then names with "server".
+            exe = exes.OrderByDescending(p => Native.IsGuiExe(p) == false)
+                      .ThenByDescending(p => Path.GetFileName(p).Contains("server", StringComparison.OrdinalIgnoreCase))
+                      .Select(Path.GetFileName).FirstOrDefault();
         }
         inst.Executable = exe ?? "";
+        inst.Launcher = g.Launcher is { } l && File.Exists(Path.Combine(installDir, l)) ? l : FindLauncher(exes, inst.Executable) ?? "";
         return inst;
     }
+
+    private static readonly Regex LauncherName = new(@"launcher|config|configurator|manager|setup|admin|tool", RegexOptions.IgnoreCase);
+
+    /// <summary>A windowed program next to the server whose name suggests it sets the server up, e.g. "ServerLauncher.exe".</summary>
+    public static string? FindLauncher(IEnumerable<string> exePaths, string serverExe) =>
+        exePaths.Where(p => !Path.GetFileName(p).Equals(serverExe, StringComparison.OrdinalIgnoreCase))
+            .Where(p => !Regex.IsMatch(Path.GetFileName(p), @"crash|report|unins|redist|vc_?redist|dxsetup|UnityCrash|BsSndRpt|EasyAntiCheat|BEService", RegexOptions.IgnoreCase))
+            .Where(p => LauncherName.IsMatch(Path.GetFileNameWithoutExtension(p)) && Native.IsGuiExe(p) == true)
+            .Select(Path.GetFileName).FirstOrDefault();
 }
 
 /// <summary>Small read-only parsers used to pull RCON details out of game configs.</summary>
