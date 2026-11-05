@@ -114,7 +114,95 @@ const icons = {
   folder: '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M2 5.5A1.5 1.5 0 0 1 3.5 4h4l1.6 1.8h7.4A1.5 1.5 0 0 1 18 7.3v7.2a1.5 1.5 0 0 1-1.5 1.5h-13A1.5 1.5 0 0 1 2 14.5z"/></svg>',
   file: '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M5 2h6l4 4v11a1 1 0 0 1-1 1H5a1 1 0 0 1-1-1V3a1 1 0 0 1 1-1zm6 1v4h4"/></svg>',
   drive: '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M3 6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm11 6.5a1 1 0 1 0 0 .01z"/></svg>',
+  copy: '<svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 4.5V4a1.5 1.5 0 0 0-1.5-1.5h-7A1.5 1.5 0 0 0 3 4v7a1.5 1.5 0 0 0 1.5 1.5H5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
+  caret: '<svg width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
 };
+
+// ---------------- clipboard & network addresses ----------------
+
+// navigator.clipboard only exists on https or localhost, so remote browsers on http://192.168… need the old way.
+async function copyText(text, message) {
+  let ok = false;
+  try { if (navigator.clipboard && window.isSecureContext) { await navigator.clipboard.writeText(text); ok = true; } } catch { }
+  if (!ok) {
+    const ta = h('textarea', { style: { position: 'fixed', top: '-1000px', opacity: '0' }, readonly: true });
+    ta.value = text;
+    document.body.append(ta);
+    ta.select();
+    try { ok = document.execCommand('copy'); } catch { }
+    ta.remove();
+  }
+  if (ok) toast(message || `Copied ${text}`, 'good');
+  else window.prompt('Copy this:', text);
+}
+
+const network = { local: null, publicIp: undefined, loading: null };
+
+// Local addresses are cheap; the public IP is only looked up (via ipify.org) when asked for.
+async function loadNetwork(includePublic) {
+  if (network.local && (!includePublic || network.publicIp !== undefined)) return network;
+  const r = await api('GET', `/api/network${includePublic ? '?includePublic=true' : ''}`);
+  network.local = r.local;
+  if (includePublic) network.publicIp = r.publicIp || null;
+  return network;
+}
+
+function primaryLocal() { return network.local?.find(a => a.primary) || network.local?.find(a => a.kind === 'lan') || network.local?.[0]; }
+
+// Keys like ip, ServerIP, PublicIP, server-ip, bindAddress, multihome, or any value that already looks like an IPv4 address.
+function isIpField(f) {
+  const k = f.key.toLowerCase().replace(/[^a-z]/g, '');
+  const keyLooksIp = /^(|server|public|local|bind|host|lan|wan|external|internal|query|game|listen|rcon|steam)ip$/.test(k)
+    || /^(ipaddress|bindaddress|serveraddress|hostaddress|publicaddress|listenaddress|multihome|bindip|serverip)$/.test(k);
+  const valueLooksIp = /^\s*\d{1,3}(\.\d{1,3}){3}\s*$/.test(String(f.value));
+  return f.type !== 'boolean' && (keyLooksIp || valueLooksIp);
+}
+const wantsPublicIp = f => /public|external|wan/i.test(f.key);
+
+// A small dropdown anchored under a button. items: [{ label, sub, onClick }] or 'sep'.
+function openMenu(anchor, items) {
+  document.querySelector('.menu-pop')?.remove();
+  const menu = h('div', { class: 'menu-pop', role: 'menu' });
+  for (const it of items) {
+    if (it === 'sep') { menu.append(h('div', { class: 'menu-sep' })); continue; }
+    if (it.heading) { menu.append(h('div', { class: 'menu-head' }, it.heading)); continue; }
+    menu.append(h('button', { class: 'menu-item', type: 'button', role: 'menuitem', disabled: it.disabled || null,
+      onclick: () => { close(); it.onClick?.(); } },
+      h('span', { class: 'mi-label' }, it.label), it.sub ? h('span', { class: 'mi-sub' }, it.sub) : null));
+  }
+  document.body.append(menu);
+  const r = anchor.getBoundingClientRect();
+  const left = Math.min(r.left, window.innerWidth - menu.offsetWidth - 12);
+  const top = r.bottom + 6 + menu.offsetHeight > window.innerHeight ? r.top - menu.offsetHeight - 6 : r.bottom + 6;
+  Object.assign(menu.style, { left: `${Math.max(8, left)}px`, top: `${Math.max(8, top)}px` });
+  const close = () => { menu.remove(); document.removeEventListener('mousedown', outside, true); document.removeEventListener('keydown', esc, true); };
+  const outside = e => { if (!menu.contains(e.target) && !anchor.contains(e.target)) close(); };
+  const esc = e => { if (e.key === 'Escape') { e.stopPropagation(); close(); anchor.focus(); } };
+  setTimeout(() => { document.addEventListener('mousedown', outside, true); document.addEventListener('keydown', esc, true); });
+  menu.querySelector('.menu-item:not([disabled])')?.focus();
+  return { close, menu };
+}
+
+// Menu entries for every address of this PC: local adapters, VPNs, then the public IP.
+async function addressMenuItems(format, pick) {
+  try { await loadNetwork(true); } catch (e) { toast(e.message, 'bad'); }
+  const items = [];
+  const lan = (network.local || []).filter(a => a.kind === 'lan');
+  const vpn = (network.local || []).filter(a => a.kind === 'vpn');
+  if (lan.length) {
+    items.push({ heading: 'Friends on your home network' });
+    for (const a of lan) items.push({ label: format(a.address), sub: a.adapter + (a.primary ? ' (main connection)' : ''), onClick: () => pick(a.address, 'local') });
+  }
+  if (vpn.length) {
+    items.push({ heading: 'Friends on your VPN' });
+    for (const a of vpn) items.push({ label: format(a.address), sub: a.adapter, onClick: () => pick(a.address, 'vpn') });
+  }
+  items.push({ heading: 'Friends over the internet' });
+  items.push(network.publicIp
+    ? { label: format(network.publicIp), sub: 'Public IP. Needs port forwarding on your router.', onClick: () => pick(network.publicIp, 'public') }
+    : { label: 'Public IP unavailable', sub: 'Couldn\'t reach ipify.org to look it up.', disabled: true });
+  return items;
+}
 
 // ---------------- modals ----------------
 
@@ -183,6 +271,7 @@ function select(id) {
   state.selectedId = id;
   localStorage.setItem('hb.selected', id || '');
   state.detail = null; state.editor = null; state.configs = null;
+  $("#joinValue").textContent = "–";
   renderAll();
   loadDetail();
   connectLogs();
@@ -197,6 +286,7 @@ async function loadDetail() {
     state.detail = d;
     renderHeader();
     renderQuickCommands();
+    renderJoin();
     if (state.tab === 'settings') renderSettings();
     if (state.tab === 'configs') loadConfigs();
   } catch (e) { toast(e.message, 'bad'); }
@@ -211,6 +301,48 @@ function renderAll() {
   if (!s) return;
   renderHeader();
   setTab(state.tab, true);
+}
+
+// Where a join port came from, in words: "the game's default", "from server.properties"…
+function portSource(j, capital) {
+  const t = j.source === 'game default' ? "the game's default" : j.source === 'set in Settings' ? 'set in Settings' : `from ${j.source}`;
+  return capital ? t.charAt(0).toUpperCase() + t.slice(1) : t;
+}
+
+// "Join address": this PC's main IP plus the port players connect on, with a menu for other addresses.
+async function renderJoin() {
+  const label = $('#joinLabel'), value = $('#joinValue');
+  const d = state.detail, s = current();
+  if (!d || !s || d.config.id !== s.id) { value.textContent = '–'; return; }
+  const j = d.join || {};
+  value.replaceChildren();
+
+  if (j.code) {
+    label.textContent = j.codeLabel || 'Join code';
+    value.append(h('span', { class: 'join-addr' }, j.code),
+      h('button', { class: 'btn btn-tiny', type: 'button', title: `Copy the ${j.codeLabel || 'code'}`, html: icons.copy,
+        onclick: () => copyText(j.code, `Copied the ${j.codeLabel || 'code'}.`) }));
+    return;
+  }
+  label.textContent = 'Join address';
+  if (j.codeLabel) { value.append(h('span', { class: 'dim join-hint' }, `Start the server once to get its ${j.codeLabel}`)); return; }
+  if (!j.port) {
+    value.append(h('button', { class: 'link join-hint', type: 'button', onclick: () => setTab('settings') }, 'Set the join port in Settings'));
+    return;
+  }
+  try { await loadNetwork(false); } catch { }
+  if (state.detail !== d) return; // switched servers while loading
+  const ip = primaryLocal()?.address || '127.0.0.1';
+  const addr = `${ip}:${j.port}`;
+  const copyBtn = h('button', { class: 'btn btn-tiny', type: 'button', title: 'Copy the address for friends on your network', html: icons.copy,
+    onclick: () => copyText(addr, `Copied ${addr}`) });
+  const more = h('button', { class: 'btn btn-tiny', type: 'button', title: 'Other addresses: VPN or internet', 'aria-haspopup': 'menu', html: icons.caret });
+  more.onclick = async () => {
+    const items = await addressMenuItems(a => `${a}:${j.port}`, a => copyText(`${a}:${j.port}`));
+    items.push('sep', { label: `Port ${j.port}`, sub: `${portSource(j, true)}. Change it under Settings → Join port.`, disabled: true });
+    openMenu(more, items);
+  };
+  value.append(h('span', { class: 'join-addr', title: `Port: ${portSource(j)}` }, addr), copyBtn, more);
 }
 
 function renderHeader() {
@@ -606,6 +738,33 @@ function fieldRow(f, originalValue) {
     control.value = f.value;
     control.addEventListener('input', () => commit(control.value));
   }
+  if (kind !== 'bool' && kind !== 'long' && isIpField(f)) {
+    // "Fill current IP": one click fills the likely address; the caret offers every other choice.
+    const set = v => { control.value = v; commit(v); control.focus(); };
+    const isPublic = wantsPublicIp(f);
+    const fill = h('button', { class: 'btn btn-small', type: 'button',
+      title: isPublic ? 'Fill in this network\'s public IP' : 'Fill in this PC\'s IP on your home network' }, 'Fill current IP');
+    fill.onclick = async () => {
+      fill.disabled = true;
+      try {
+        await loadNetwork(isPublic);
+        const v = isPublic ? network.publicIp : primaryLocal()?.address;
+        if (v) { set(v); toast(`Filled in ${v}. Save to keep it.`); }
+        else toast(isPublic ? 'Couldn\'t look up your public IP. Pick an address from the menu instead.' : 'No network connection found.', 'bad');
+      } catch (e) { toast(e.message, 'bad'); }
+      fill.disabled = false;
+    };
+    const more = h('button', { class: 'btn btn-small btn-icon-sm', type: 'button', title: 'Choose an address', 'aria-haspopup': 'menu', html: icons.caret });
+    more.onclick = async () => {
+      const items = await addressMenuItems(a => a, a => set(a));
+      items.push('sep', { heading: 'Other' },
+        { label: '0.0.0.0', sub: 'Listen on every network adapter (a safe default for bind addresses)', onClick: () => set('0.0.0.0') },
+        { label: 'Leave empty', sub: 'Let the server decide', onClick: () => set('') });
+      openMenu(more, items);
+    };
+    row.append(label, h('div', { class: 'with-fill' }, control, fill, more));
+    return row;
+  }
   row.append(label, h('div', {}, control));
   return row;
 }
@@ -643,6 +802,8 @@ async function saveFile(force = false) {
     toast(r.backup ? `Saved ${ed.name}. The previous version is in Backups.` : `Saved ${ed.name}.`, 'good');
     renderEditor();
     loadBackups();
+    // The join port can live in a config file (server.properties, serverconfig.xml…), so refresh it.
+    api('GET', `/api/servers/${s.id}/join`).then(j => { if (state.detail?.config.id === s.id) { state.detail.join = j; renderJoin(); } }).catch(() => { });
   } catch (e) {
     if (e.status === 409) {
       if (await confirmDialog('File changed on disk', 'Something else (often the server itself) changed this file after you opened it. Overwrite it with your version?', { okText: 'Overwrite', danger: true })) saveFile(true);
@@ -866,6 +1027,14 @@ function renderSettings() {
       row('Name', text('name')),
       row('Game', gameSel, 'Sets where Hostbay looks for config and log files, and how it talks to the server.'),
       row('Server folder', withBrowse(text('installDir', { mono: true }), { title: 'Choose the server folder' })),
+      d.join?.code || d.join?.codeLabel ? null : row('Join port', text('joinPort', {
+        type: 'number', mono: true,
+        get: () => c.joinPort ?? '',
+        set: v => { c.joinPort = v.trim() === '' ? null : Number(v); },
+        placeholder: d.join?.port && d.join.source !== 'set in Settings' ? `Detected: ${d.join.port}` : 'For example 27015',
+      }), d.join?.port && d.join.source !== 'set in Settings'
+        ? `The port friends connect on. Leave it empty to keep using ${d.join.port} (${portSource(d.join)}).`
+        : 'The port friends connect on, used by Copy address. Leave it empty to detect it from the launch arguments or config.'),
     )));
 
   const exeInput = text('executable', { mono: true });
@@ -956,7 +1125,7 @@ function renderSettings() {
       const r = await api('PUT', `/api/servers/${c.id}`, c);
       state.detail = r;
       toast('Settings saved.', 'good');
-      renderSettings(); renderQuickCommands();
+      renderSettings(); renderQuickCommands(); renderJoin();
       state.configs = null;
     } catch (err) { toast(err.message, 'bad'); }
   };
@@ -1114,6 +1283,7 @@ function browse({ title, files = false, start = '' }) {
 // ---------------- app settings ----------------
 
 async function appSettingsDialog() {
+  network.local = null; network.publicIp = undefined; // adapters may have changed since last time
   let st;
   try { st = await api('GET', '/api/settings'); } catch (e) { toast(e.message, 'bad'); return; }
   const body = h('div', { class: 'field-stack' });
@@ -1124,7 +1294,30 @@ async function appSettingsDialog() {
     const pw = h('input', { class: 'input', type: 'password', placeholder: st.hasPassword ? 'Enter a new password to change it' : 'At least 6 characters', autocomplete: 'new-password' });
     const tray = h('input', { type: 'checkbox', ...(st.minimizeToTray ? { checked: true } : {}) });
 
+    // This PC's addresses, each with a Copy button. Filled in once the public IP lookup returns.
+    const copyLine = (value, what) => h('div', { class: 'addr-line' }, h('code', {}, value),
+      h('button', { class: 'btn btn-small', type: 'button', onclick: () => copyText(value, `Copied ${what || value}`) }, h('span', { html: icons.copy }), 'Copy'));
+    const addrRow = (title, sub, valueEl, help) => h('div', { class: 'set-row' },
+      h('label', {}, title, sub ? h('span', { class: 'label-sub' }, sub) : null),
+      h('div', {}, valueEl, help ? h('div', { class: 'help' }, help) : null));
+    const addrRows = h('div', { class: 'set-rows' }, h('div', { class: 'dim' }, 'Looking up your addresses…'));
+    loadNetwork(true).then(() => {
+      addrRows.replaceChildren();
+      for (const a of network.local || []) {
+        addrRows.append(addrRow(a.kind === 'vpn' ? 'VPN IP' : 'Local IP', a.adapter, copyLine(a.address),
+          a.kind === 'vpn' ? 'For friends connected to the same VPN.' : a.primary ? 'For friends on your home network (same Wi-Fi or router).' : null));
+      }
+      if (!(network.local || []).length) addrRows.append(h('div', { class: 'dim' }, 'No network connection found.'));
+      addrRows.append(addrRow('Public IP', 'Your internet address',
+        network.publicIp ? copyLine(network.publicIp) : h('span', { class: 'dim' }, 'Couldn\'t look it up. Check your internet connection.'),
+        'For friends outside your home. Only works after you forward the server\'s port on your router.'));
+    }).catch(e => addrRows.replaceChildren(h('div', { class: 'dim' }, e.message)));
+
     body.append(
+      h('div', { class: 'set-group' },
+        h('h2', {}, 'This PC\'s addresses'),
+        h('p', {}, 'Friends join with an address and the server\'s port, separated by a colon, like 192.168.1.20:8211. The Copy button next to each server\'s join address includes the right port for you.'),
+        addrRows),
       h('div', { class: 'set-group' },
         h('h2', {}, 'Remote access'),
         h('p', {}, 'Control your servers from another PC or your phone on the same network. Open the address below in a browser and sign in with the password.'),
@@ -1138,7 +1331,7 @@ async function appSettingsDialog() {
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, remote, h('span')),
               h('span', { class: 'dim' }, st.hasPassword ? (st.listeningOnLan ? 'On. Other devices can connect.' : 'Off. Only this PC can open Hostbay.') : 'Set a password first.'))),
           st.listeningOnLan ? h('div', { class: 'set-row' }, h('label', {}, 'Address'),
-            h('div', { class: 'url-list' }, st.lanUrls.length ? st.lanUrls.map(u => h('code', {}, u)) : h('span', { class: 'dim' }, 'No network connection found.'))) : null,
+            h('div', { class: 'url-list' }, st.lanUrls.length ? st.lanUrls.map(u => copyLine(u, 'the link')) : h('span', { class: 'dim' }, 'No network connection found.'))) : null,
           h('div', { class: 'set-row' }, h('label', {}, 'Port'), h('div', {}, port,
             h('div', { class: 'help' }, st.port !== st.configuredPort ? `Port ${st.configuredPort} was busy, so Hostbay is using ${st.port}.` : 'When you first turn on remote access, Windows asks whether to allow Hostbay through the firewall. Allow it on private networks.'))),
         )),
@@ -1207,7 +1400,7 @@ function wire() {
   $('#stopBtn').onclick = () => control('stop');
   $('#restartBtn').onclick = () => control('restart');
   $('#killBtn').onclick = () => control('kill');
-  $('#headPath').onclick = () => { navigator.clipboard?.writeText(current()?.installDir || ''); toast('Copied the folder path.'); };
+  $('#headPath').onclick = () => copyText(current()?.installDir || '', 'Copied the folder path.');
   $$('.tab[data-tab]').forEach(t => t.onclick = () => setTab(t.dataset.tab));
 
   const c = $('#console');
@@ -1222,10 +1415,7 @@ function wire() {
   times.checked = localStorage.getItem('hb.times') === '1';
   const applyView = () => { c.classList.toggle('wrap', wrap.checked); c.classList.toggle('times', times.checked); localStorage.setItem('hb.wrap', wrap.checked ? '1' : '0'); localStorage.setItem('hb.times', times.checked ? '1' : '0'); };
   wrap.onchange = applyView; times.onchange = applyView; applyView();
-  $('#copyLogBtn').onclick = () => {
-    navigator.clipboard?.writeText(state.logLines.map(l => l.text).join('\n'));
-    toast('Copied the log to the clipboard.');
-  };
+  $('#copyLogBtn').onclick = () => copyText(state.logLines.map(l => l.text).join('\n'), 'Copied the log to the clipboard.');
   $('#clearLogBtn').onclick = async () => {
     const s = current(); if (!s) return;
     await api('POST', `/api/servers/${s.id}/logs/clear`).catch(() => { });

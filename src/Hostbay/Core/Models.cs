@@ -43,6 +43,8 @@ public sealed class ServerInstance
     /// <summary>Extra log files to tail (relative to install dir or absolute).</summary>
     public List<string> ExtraLogFiles { get; set; } = new();
     public int? SteamAppId { get; set; }
+    /// <summary>Port players connect to. Null means detect it from the launch arguments or game config.</summary>
+    public int? JoinPort { get; set; }
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;
 }
 

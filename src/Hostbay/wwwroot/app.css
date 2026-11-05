@@ -419,3 +419,43 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 @media (prefers-reduced-motion: reduce) {
   *, *::before, *::after { animation: none !important; transition: none !important; }
 }
+
+/* ---------- join address, copy buttons & dropdown menus ---------- */
+.stats .stat-join { margin-left: auto; text-align: right; }
+.stat-join dd { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.join-addr { font: 600 14px var(--mono); color: color-mix(in srgb, var(--game) 35%, var(--fog)); user-select: all; }
+.join-hint { font: 500 13px var(--ui); }
+.btn-tiny { height: 24px; width: 26px; padding: 0; border-radius: 5px; color: var(--fog-dim); }
+.btn-tiny:hover:not(:disabled) { color: var(--fog); }
+.btn-small svg { flex: none; }
+.btn-icon-sm { width: 28px; padding: 0; }
+
+.with-fill { display: flex; gap: 6px; align-items: center; }
+.with-fill .input { flex: 1; }
+
+.menu-pop {
+  position: fixed; z-index: 90; min-width: 260px; max-width: 380px; padding: 6px;
+  background: var(--deck); border: 1px solid var(--rope-hi); border-radius: var(--r-md);
+  box-shadow: 0 16px 40px rgba(0,0,0,.5); animation: rise .12s ease-out;
+}
+.menu-head { padding: 8px 10px 4px; font-size: 12px; color: var(--fog-faint); }
+.menu-sep { height: 1px; background: var(--rope); margin: 6px 4px; }
+.menu-item {
+  display: flex; flex-direction: column; align-items: flex-start; gap: 1px; width: 100%;
+  padding: 7px 10px; border: 0; border-radius: 6px; background: none; text-align: left; cursor: pointer;
+}
+.menu-item:hover:not(:disabled), .menu-item:focus-visible { background: var(--deck-hi); outline: none; }
+.menu-item:disabled { cursor: default; }
+.mi-label { font: 600 13px var(--mono); }
+.menu-item:disabled .mi-label { font-family: var(--ui); color: var(--fog-dim); }
+.mi-sub { font-size: 12px; color: var(--fog-faint); }
+
+.addr-line { display: flex; align-items: center; gap: 10px; padding-top: 3px; }
+.addr-line code { font: 600 14px var(--mono); color: var(--fog); user-select: all; }
+.set-row .label-sub { display: block; font-weight: 400; font-size: 12px; color: var(--fog-faint); }
+
+@media (max-width: 860px) {
+  .stats .stat-join { margin-left: 0; text-align: left; }
+  .stat-join dd { justify-content: flex-start; }
+  .with-fill { flex-wrap: wrap; }
+}

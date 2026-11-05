@@ -263,6 +263,17 @@ public static class Api
 
         api.MapGet("/settings", () => SettingsDto(mgr, host));
 
+        // This PC's addresses for "Copy address" and "Fill current IP". The public IP is only
+        // looked up (via ipify.org) when the UI asks for it.
+        api.MapGet("/network", async (bool? includePublic) => new
+        {
+            local = NetworkInfo.LocalAddresses(),
+            publicIp = includePublic == true ? await NetworkInfo.PublicIpAsync() : null,
+        });
+
+        api.MapGet("/servers/{id}/join", (string id) =>
+            mgr.Get(id) is { } rt ? Results.Ok(JoinInfo.Resolve(rt.Config)) : Results.NotFound());
+
         api.MapPut("/settings", (SettingsRequest req) =>
         {
             var s = mgr.Settings;
@@ -357,6 +368,7 @@ public static class Api
             installDirExists = Directory.Exists(rt.Config.InstallDir),
             remoteConsole = rc == null ? null : new { rc.Host, rc.Port, hasPassword = rc.Password.Length > 0 },
             logFiles = rt.LogFilePatterns(),
+            join = JoinInfo.Resolve(rt.Config),
         };
     }
 
@@ -368,7 +380,7 @@ public static class Api
         listeningOnLan = host.ListeningOnLan,
         hasPassword = host.Auth.HasPassword,
         minimizeToTray = mgr.Settings.MinimizeToTray,
-        lanUrls = WebHost.LanAddresses().Select(a => $"http://{a}:{host.Port}"),
+        lanUrls = NetworkInfo.LocalAddresses().Select(a => $"http://{a.Address}:{host.Port}"),
         dataDir = ServerManager.DataDir,
         version = typeof(Api).Assembly.GetName().Version?.ToString(3),
     };

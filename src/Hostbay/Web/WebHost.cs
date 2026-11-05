@@ -203,16 +203,4 @@ public sealed class WebHost
         ctx.Response.Headers["X-Frame-Options"] = "DENY";
         await stream.CopyToAsync(ctx.Response.Body);
     }
-
-    // ---------- network info ----------
-
-    public static string[] LanAddresses() =>
-        NetworkInterface.GetAllNetworkInterfaces()
-            .Where(n => n.OperationalStatus == OperationalStatus.Up && n.NetworkInterfaceType != NetworkInterfaceType.Loopback)
-            .SelectMany(n => n.GetIPProperties().UnicastAddresses)
-            .Where(a => a.Address.AddressFamily == AddressFamily.InterNetwork && !IPAddress.IsLoopback(a.Address)
-                        && !a.Address.ToString().StartsWith("169.254."))
-            .Select(a => a.Address.ToString())
-            .Distinct()
-            .ToArray();
 }
