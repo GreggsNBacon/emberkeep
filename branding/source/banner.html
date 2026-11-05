@@ -1,0 +1,31 @@
+<!DOCTYPE html><html><head><style>
+  html,body{margin:0;width:1360px;height:480px;overflow:hidden}
+  .b{position:relative;width:1360px;height:480px;background:#0d1220;overflow:hidden;font-family:"Segoe UI Variable Display","Segoe UI",sans-serif}
+  .b{background:radial-gradient(ellipse 720px 520px at 8% 0%,rgba(124,92,255,.85),rgba(124,92,255,.35) 45%,transparent 75%),radial-gradient(ellipse 780px 520px at 100% 108%,rgba(34,211,238,.7),rgba(34,211,238,.25) 45%,transparent 75%),radial-gradient(ellipse 520px 300px at 55% 50%,rgba(91,124,255,.16),transparent 70%),#0d1220 !important}
+  .glow{display:none}
+  .g1{width:760px;height:560px;left:-160px;top:-260px;background:#7c5cff}
+  .g2{width:820px;height:560px;right:-220px;bottom:-300px;background:#22d3ee;opacity:.6}
+  .g3{width:420px;height:300px;left:520px;top:120px;background:#5b7cff;opacity:.25}
+  /* faint rack lines */
+  .grid{position:absolute;inset:0;background:repeating-linear-gradient(180deg,rgba(255,255,255,.035) 0 2px,transparent 2px 48px);mask-image:linear-gradient(90deg,transparent,#000 35%,#000 75%,transparent)}
+  .content{position:absolute;left:380px;top:0;bottom:0;display:flex;align-items:center;gap:44px}
+  .logo{width:184px;height:184px;filter:drop-shadow(0 18px 40px rgba(20,10,60,.55))}
+  h1{margin:0;color:#fff;font-weight:700;font-size:124px;letter-spacing:-3px;line-height:1}
+  p{margin:16px 0 0 4px;color:#c9d3e6;font-size:34px;font-weight:500;letter-spacing:.2px}
+  .tags{display:flex;gap:14px;margin:26px 0 0 4px}
+  .tag{display:flex;align-items:center;gap:10px;padding:9px 18px;border-radius:999px;background:rgba(255,255,255,.08);border:1px solid rgba(255,255,255,.14);color:#e6ecf7;font:600 22px "Segoe UI Variable Text","Segoe UI",sans-serif}
+  .dot{width:11px;height:11px;border-radius:50%;background:#34d399;box-shadow:0 0 0 4px rgba(52,211,153,.2)}
+</style></head><body><div class="b">
+  <div class="glow g1"></div><div class="glow g2"></div><div class="glow g3"></div><div class="grid"></div>
+  <div class="content">
+    <svg class="logo" viewBox="0 0 64 64"><defs><linearGradient id="g" x1="0" y1="0" x2="1" y2="1"><stop offset="0" stop-color="#7c5cff"/><stop offset="1" stop-color="#22d3ee"/></linearGradient></defs>
+      <rect width="64" height="64" rx="14" fill="url(#g)"/>
+      <g fill="#fff" fill-opacity=".95"><rect x="13" y="16" width="38" height="8" rx="3"/><rect x="13" y="28" width="38" height="8" rx="3"/><rect x="13" y="40" width="38" height="8" rx="3"/></g>
+      <g fill="#34d399"><circle cx="45" cy="20" r="2"/><circle cx="45" cy="32" r="2"/><circle cx="45" cy="44" r="2"/></g></svg>
+    <div>
+      <h1>Hostbay</h1>
+      <p>Your game servers, one tap away</p>
+      <div class="tags"><span class="tag"><span class="dot"></span>Live status</span><span class="tag">Join addresses</span><span class="tag">/servers · /ip</span></div>
+    </div>
+  </div>
+</div></body></html>
