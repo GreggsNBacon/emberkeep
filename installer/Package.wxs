@@ -71,27 +71,124 @@
       <RegistryValue Root="HKCU" Key="Software\Hostbay" Name="PortHopShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
 
-    <Feature Id="Main" Title="Hostbay">
+    <!-- Two independent features: install either app on its own, or both. The choice page below shows them as tickboxes;
+         silent installs can pick with ADDLOCAL=Hostbay, ADDLOCAL=PortHop or ADDLOCAL=ALL. -->
+    <Feature Id="Hostbay" Title="Hostbay" Description="Manage your game servers." AllowAbsent="yes">
       <ComponentRef Id="HostbayExeComponent" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+    <Feature Id="PortHop" Title="PortHop" Description="Open ports on your router for game servers." AllowAbsent="yes">
       <ComponentRef Id="PortHopExeComponent" />
       <ComponentRef Id="PortHopShortcut" />
     </Feature>
 
-    <!-- Installer look and the "Launch Hostbay" checkbox on the last page. -->
+    <!-- Tickbox defaults: both on a fresh install; on an upgrade, whatever is installed now. -->
+    <Property Id="INSTALL_HOSTBAY" Value="1" />
+    <Property Id="INSTALL_PORTHOP" Value="1" />
+    <Property Id="PREV_HOSTBAY">
+      <RegistrySearch Id="PrevHostbay" Root="HKCU" Key="Software\Hostbay" Name="InstallFolder" Type="raw" />
+    </Property>
+    <Property Id="PREV_PORTHOP">
+      <RegistrySearch Id="PrevPortHop" Root="HKCU" Key="Software\Hostbay" Name="PortHopFolder" Type="raw" />
+    </Property>
+    <!-- A tickbox is ticked whenever its property has a value, so "untick" means clearing it ([NO_VALUE] is never set). -->
+    <SetProperty Id="INSTALL_PORTHOP" Value="[NO_VALUE]" After="AppSearch" Sequence="ui" Condition="PREV_HOSTBAY AND NOT PREV_PORTHOP" />
+    <SetProperty Id="INSTALL_HOSTBAY" Value="[NO_VALUE]" After="AppSearch" Sequence="ui" Condition="PREV_PORTHOP AND NOT PREV_HOSTBAY" />
+
+    <!-- Installer look and the "Launch …" checkbox on the last page. -->
     <WixVariable Id="WixUILicenseRtf" Value="Assets\License.rtf" />
     <WixVariable Id="WixUIBannerBmp" Value="Assets\Banner.bmp" />
     <WixVariable Id="WixUIDialogBmp" Value="Assets\Dialog.bmp" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Hostbay" />
     <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
     <Property Id="WixShellExecTarget" Value="[#HostbayExe]" />
-    <CustomAction Id="LaunchHostbay" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" />
+    <CustomAction Id="LaunchApp" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" />
 
-    <UI>
-      <ui:WixUI Id="WixUI_Minimal" />
-      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchHostbay"
-               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
-    </UI>
+    <UIRef Id="HostbayUI" />
   </Package>
+
+  <!-- Welcome, licence, "Choose what to install", progress, finish. Based on WixUI_Minimal plus a choice page. -->
+  <Fragment>
+    <UI Id="HostbayUI">
+      <TextStyle Id="WixUI_Font_Normal" FaceName="Tahoma" Size="8" />
+      <TextStyle Id="WixUI_Font_Bigger" FaceName="Tahoma" Size="12" />
+      <TextStyle Id="WixUI_Font_Title" FaceName="Tahoma" Size="9" Bold="yes" />
+      <Property Id="DefaultUIFont" Value="WixUI_Font_Normal" />
+
+      <DialogRef Id="ErrorDlg" />
+      <DialogRef Id="FatalError" />
+      <DialogRef Id="FilesInUse" />
+      <DialogRef Id="MsiRMFilesInUse" />
+      <DialogRef Id="PrepareDlg" />
+      <DialogRef Id="ProgressDlg" />
+      <DialogRef Id="ResumeDlg" />
+      <DialogRef Id="UserExit" />
+      <DialogRef Id="WelcomeDlg" />
+      <DialogRef Id="LicenseAgreementDlg" />
+      <DialogRef Id="MaintenanceWelcomeDlg" />
+      <DialogRef Id="MaintenanceTypeDlg" />
+      <DialogRef Id="VerifyReadyDlg" />
+
+      <Dialog Id="ChooseAppsDlg" Width="370" Height="270" Title="!(loc.CustomizeDlg_Title)">
+        <Control Id="Install" Type="PushButton" X="236" Y="243" Width="56" Height="17" Default="yes" Text="!(loc.VerifyReadyDlgInstall)"
+                 DisableCondition="NOT INSTALL_HOSTBAY AND NOT INSTALL_PORTHOP" EnableCondition="INSTALL_HOSTBAY OR INSTALL_PORTHOP">
+          <Publish Event="AddLocal" Value="Hostbay" Condition="INSTALL_HOSTBAY" Order="1" />
+          <Publish Event="Remove" Value="Hostbay" Condition="NOT INSTALL_HOSTBAY" Order="2" />
+          <Publish Event="AddLocal" Value="PortHop" Condition="INSTALL_PORTHOP" Order="3" />
+          <Publish Event="Remove" Value="PortHop" Condition="NOT INSTALL_PORTHOP" Order="4" />
+          <!-- The finish page offers to open whichever app was installed. -->
+          <Publish Property="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch PortHop" Condition="NOT INSTALL_HOSTBAY" Order="5" />
+          <Publish Property="WixShellExecTarget" Value="[#PortHopExe]" Condition="NOT INSTALL_HOSTBAY" Order="6" />
+          <Publish Property="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Hostbay" Condition="INSTALL_HOSTBAY" Order="7" />
+          <Publish Property="WixShellExecTarget" Value="[#HostbayExe]" Condition="INSTALL_HOSTBAY" Order="8" />
+          <Publish Event="EndDialog" Value="Return" Order="9" />
+        </Control>
+        <Control Id="HostbayBox" Type="CheckBox" X="25" Y="58" Width="320" Height="17" Property="INSTALL_HOSTBAY" CheckBoxValue="1" Text="Hostbay" />
+        <Control Id="HostbayText" Type="Text" X="40" Y="76" Width="310" Height="26" NoPrefix="yes"
+                 Text="Manage your game servers: start and stop them, edit their configs, watch logs and share join addresses." />
+        <Control Id="PortHopBox" Type="CheckBox" X="25" Y="110" Width="320" Height="17" Property="INSTALL_PORTHOP" CheckBoxValue="1" Text="PortHop" />
+        <Control Id="PortHopText" Type="Text" X="40" Y="128" Width="310" Height="36" NoPrefix="yes"
+                 Text="Open ports on your router (UPnP) so friends can join your servers. Hostbay forwards ports through PortHop when it's installed, and opens them itself when it isn't." />
+        <Control Id="NoneText" Type="Text" X="25" Y="178" Width="320" Height="15" NoPrefix="yes" Text="Tick at least one app to install."
+                 HideCondition="INSTALL_HOSTBAY OR INSTALL_PORTHOP" ShowCondition="NOT INSTALL_HOSTBAY AND NOT INSTALL_PORTHOP" />
+        <Control Id="Back" Type="PushButton" X="180" Y="243" Width="56" Height="17" Text="!(loc.WixUIBack)">
+          <Publish Event="NewDialog" Value="[ChooseAppsBack]" />
+        </Control>
+        <Control Id="Cancel" Type="PushButton" X="304" Y="243" Width="56" Height="17" Cancel="yes" Text="!(loc.WixUICancel)">
+          <Publish Event="SpawnDialog" Value="CancelDlg" />
+        </Control>
+        <Control Id="BannerBitmap" Type="Bitmap" X="0" Y="0" Width="370" Height="44" TabSkip="no" Text="!(loc.CustomizeDlgBannerBitmap)" />
+        <Control Id="BannerLine" Type="Line" X="0" Y="44" Width="370" Height="0" />
+        <Control Id="Title" Type="Text" X="15" Y="6" Width="210" Height="15" Transparent="yes" NoPrefix="yes" Text="{\WixUI_Font_Title}Choose what to install" />
+        <Control Id="Description" Type="Text" X="25" Y="23" Width="280" Height="15" Transparent="yes" NoPrefix="yes" Text="Tick the apps you want. Each one works on its own." />
+        <Control Id="BottomLine" Type="Line" X="0" Y="234" Width="370" Height="0" />
+      </Dialog>
+
+      <!-- New install: Welcome -> Licence -> Choose -> install. -->
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="LicenseAgreementDlg" Condition="NOT Installed" />
+      <Publish Dialog="WelcomeDlg" Control="Next" Event="NewDialog" Value="VerifyReadyDlg" Condition="Installed AND PATCH" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Back" Event="NewDialog" Value="WelcomeDlg" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Property="ChooseAppsBack" Value="LicenseAgreementDlg" Condition="LicenseAccepted = &quot;1&quot;" Order="1" />
+      <Publish Dialog="LicenseAgreementDlg" Control="Next" Event="NewDialog" Value="ChooseAppsDlg" Condition="LicenseAccepted = &quot;1&quot;" Order="2" />
+
+      <!-- Running the same installer again: Change (back to the choice page) or Remove. -->
+      <Publish Dialog="MaintenanceWelcomeDlg" Control="Next" Event="NewDialog" Value="MaintenanceTypeDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="ChangeButton" Property="ChooseAppsBack" Value="MaintenanceTypeDlg" Order="1" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="ChangeButton" Property="INSTALL_HOSTBAY" Value="[NO_VALUE]" Condition="NOT (!Hostbay = 3)" Order="2" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="ChangeButton" Property="INSTALL_PORTHOP" Value="[NO_VALUE]" Condition="NOT (!PortHop = 3)" Order="3" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="ChangeButton" Event="NewDialog" Value="ChooseAppsDlg" Order="4" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RepairButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="RemoveButton" Event="NewDialog" Value="VerifyReadyDlg" />
+      <Publish Dialog="MaintenanceTypeDlg" Control="Back" Event="NewDialog" Value="MaintenanceWelcomeDlg" />
+      <Publish Dialog="VerifyReadyDlg" Control="Back" Event="NewDialog" Value="MaintenanceTypeDlg" Order="1" Condition="Installed" />
+
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchApp" Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="EndDialog" Value="Return" Order="999" />
+
+      <Property Id="ChooseAppsBack" Value="LicenseAgreementDlg" />
+    </UI>
+
+    <UIRef Id="WixUI_Common" />
+  </Fragment>
 </Wix>
