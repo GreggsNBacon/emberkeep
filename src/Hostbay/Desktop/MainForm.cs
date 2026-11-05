@@ -146,6 +146,19 @@ public sealed class MainForm : Form
             }
             return;
         }
+        if (e.CloseReason is CloseReason.WindowsShutDown or CloseReason.TaskManagerClosing)
+        {
+            // Windows is shutting down, or an installer is updating Hostbay (Restart Manager): no prompts,
+            // just save-and-stop the servers within a short time limit so the update isn't held up.
+            if (anyRunning)
+            {
+                foreach (var r in _mgr.Runtimes) r.Config.StopTimeoutSeconds = Math.Min(r.Config.StopTimeoutSeconds, 20);
+                try { _mgr.StopAllAsync().Wait(TimeSpan.FromSeconds(25)); } catch { }
+            }
+            _tray.Visible = false;
+            base.OnFormClosing(e);
+            return;
+        }
         if (!_reallyExit && anyRunning && !ConfirmStopAll()) { e.Cancel = true; return; }
         _tray.Visible = false;
         base.OnFormClosing(e);

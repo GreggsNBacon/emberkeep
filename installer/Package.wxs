@@ -3,16 +3,23 @@
 
   <!--
     Per-user install: goes to %LOCALAPPDATA%\Programs\Hostbay, needs no admin rights.
-    The version comes from Hostbay.exe itself, so bumping <Version> in Hostbay.csproj is enough.
+    The version comes from Hostbay.exe itself (build.ps1 stamps a rising number into it).
+
+    Upgrades: every build gets a fresh ProductCode, so Windows always treats a new installer as an
+    upgrade rather than a "repair" of the installed copy. The old version is removed completely before
+    the new one is installed (afterInstallInitialize), and same-version rebuilds are allowed to replace
+    each other, so the newest installer you run always wins.
   -->
   <Package Name="Hostbay"
            Manufacturer="Hostbay"
            Version="!(bind.FileVersion.HostbayExe)"
+           ProductCode="$(ProductCode)"
            UpgradeCode="F67D7696-CCF3-4208-908B-D6B67D7EAF50"
            Scope="perUser"
            Compressed="yes">
 
-    <MajorUpgrade DowngradeErrorMessage="A newer version of Hostbay is already installed." />
+    <MajorUpgrade AllowSameVersionUpgrades="yes" Schedule="afterInstallInitialize"
+                  DowngradeErrorMessage="A newer version of Hostbay is already installed. Uninstall it first if you want to go back to this version." />
     <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
 
     <Icon Id="HostbayIcon" SourceFile="..\src\Hostbay\Assets\hostbay.ico" />

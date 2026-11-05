@@ -54,6 +54,10 @@ public sealed class AppSettings
 {
     public int Port { get; set; } = 8765;
     public bool RemoteAccess { get; set; }
+    /// <summary>Also open Hostbay's port on the router (UPnP) so it can be reached from the internet.</summary>
+    public bool InternetAccess { get; set; }
+    /// <summary>Whether the remote password is long enough (10+ characters) to allow internet access.</summary>
+    public bool LongPassword { get; set; }
     public string PasswordHash { get; set; } = "";
     public string PasswordSalt { get; set; } = "";
     public bool MinimizeToTray { get; set; } = true;

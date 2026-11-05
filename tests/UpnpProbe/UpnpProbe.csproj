@@ -1,0 +1,17 @@
+<Project Sdk="Microsoft.NET.Sdk">
+  <!-- Manual check of Hostbay's UPnP client against the real router. Arguments: map (test a raw mapping),
+       forwarder (run the real PortForwarder loop). Both use an unused port and remove it afterwards. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0-windows</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>enable</ImplicitUsings>
+    <RuntimeIdentifier>win-x64</RuntimeIdentifier>
+    <NoWarn>MSB3277</NoWarn>
+  </PropertyGroup>
+  <ItemGroup>
+    <Compile Include="..\..\src\Hostbay\Core\Upnp.cs" />
+    <Compile Include="..\..\src\Hostbay\Core\NetworkInfo.cs" />
+    <Compile Include="..\..\src\Hostbay\Core\PortForwarder.cs" />
+  </ItemGroup>
+</Project>

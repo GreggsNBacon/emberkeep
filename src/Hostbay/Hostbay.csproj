@@ -8,7 +8,7 @@
     <ImplicitUsings>disable</ImplicitUsings>
     <RootNamespace>Hostbay</RootNamespace>
     <AssemblyName>Hostbay</AssemblyName>
-    <Version>0.1.0</Version>
+    <Version>0.2.0</Version>
     <Product>Hostbay</Product>
     <Description>Game server manager</Description>
     <ApplicationIcon>Assets\hostbay.ico</ApplicationIcon>

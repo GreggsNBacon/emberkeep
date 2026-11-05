@@ -304,16 +304,32 @@ public static class Api
                 if (remote && !host.Auth.HasPassword) return Error("Set a password before turning on remote access.");
                 needsRestart |= remote != host.ListeningOnLan;
                 s.RemoteAccess = remote;
+                if (!remote) s.InternetAccess = false; // internet access rides on remote access
             }
             if (req.MinimizeToTray is bool tray) s.MinimizeToTray = tray;
+            if (req.InternetAccess is bool internet)
+            {
+                if (internet && !(req.RemoteAccess ?? s.RemoteAccess))
+                    return Error("Turn on remote access first.");
+                if (internet && !s.LongPassword)
+                    return Error($"Use a password of at least {AuthService.MinInternetPasswordLength} characters before opening Hostbay to the internet.");
+                s.InternetAccess = internet;
+            }
             mgr.Save();
+            // A restart re-applies forwarding itself; otherwise apply the change now.
             if (needsRestart) _ = Task.Run(async () => { await Task.Delay(300); await host.RestartAsync(); });
+            else host.ApplyForwarding();
             return Results.Ok(new { restarting = needsRestart });
         });
 
         api.MapPost("/settings/password", (PasswordRequest req, HttpContext ctx) =>
         {
-            try { host.Auth.SetPassword(req.Password ?? "", ctx.Request.Cookies[AuthService.CookieName]); return Results.Ok(SettingsDto(mgr, host)); }
+            try
+            {
+                host.Auth.SetPassword(req.Password ?? "", ctx.Request.Cookies[AuthService.CookieName]);
+                host.ApplyForwarding(); // a short password switches internet access off
+                return Results.Ok(SettingsDto(mgr, host));
+            }
             catch (ArgumentException ex) { return Error(ex.Message); }
         });
     }
@@ -396,6 +412,10 @@ public static class Api
         listeningOnLan = host.ListeningOnLan,
         hasPassword = host.Auth.HasPassword,
         minimizeToTray = mgr.Settings.MinimizeToTray,
+        internetAccess = mgr.Settings.InternetAccess,
+        longPassword = mgr.Settings.LongPassword,
+        minInternetPasswordLength = AuthService.MinInternetPasswordLength,
+        forwarding = host.Forwarder.Status,
         lanUrls = NetworkInfo.LocalAddresses().Select(a => $"http://{a.Address}:{host.Port}"),
         dataDir = ServerManager.DataDir,
         version = typeof(Api).Assembly.GetName().Version?.ToString(3),
@@ -404,7 +424,7 @@ public static class Api
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
-    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray);
+    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess);
     private sealed record PasswordRequest(string? Password);
     private sealed record FsEntry(string Name, string Path, bool IsDir);
 }

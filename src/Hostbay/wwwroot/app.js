@@ -59,7 +59,7 @@ async function api(method, url, body) {
 function toast(msg, kind = '') {
   const t = h('div', { class: `toast ${kind}` }, msg);
   $('#toasts').append(t);
-  setTimeout(() => t.remove(), kind === 'bad' ? 6500 : 3500);
+  setTimeout(() => t.remove(), kind === 'bad' || kind === 'warn' ? 7000 : 3500);
 }
 
 function fmtUptime(s) {
@@ -216,7 +216,8 @@ function isIpField(f) {
   const valueLooksIp = /^\s*\d{1,3}(\.\d{1,3}){3}\s*$/.test(String(f.value));
   return f.type !== 'boolean' && (keyLooksIp || valueLooksIp);
 }
-const wantsPublicIp = f => /public|external|wan/i.test(f.key);
+// IP fields not named public/external/advertised are usually the address the server listens on (bind address).
+const isBindField = f => !/public|external|wan|advertis|announce/i.test(f.key);
 
 // A small dropdown anchored under a button. items: [{ label, sub, onClick }] or 'sep'.
 function openMenu(anchor, items) {
@@ -806,16 +807,21 @@ function fieldRow(f, originalValue) {
   if (kind !== 'bool' && kind !== 'long' && isIpField(f)) {
     // "Fill current IP": one click fills the likely address; the caret offers every other choice.
     const set = v => { control.value = v; commit(v); control.focus(); };
-    const isPublic = wantsPublicIp(f);
-    const fill = h('button', { class: 'btn btn-small', type: 'button',
-      title: isPublic ? 'Fill in this network\'s public IP' : 'Fill in this PC\'s IP on your home network' }, 'Fill current IP');
+    // Fills the public IP. Fields where the server listens (bind addresses) can't use it behind a
+    // router, so for those the toast says what to pick instead if the server won't start.
+    const listens = isBindField(f);
+    const fill = h('button', { class: 'btn btn-small', type: 'button', title: 'Fill in this network\'s public IP' }, 'Fill current IP');
     fill.onclick = async () => {
       fill.disabled = true;
       try {
-        await loadNetwork(isPublic);
-        const v = isPublic ? network.publicIp : primaryLocal()?.address;
-        if (v) { set(v); toast(`Filled in ${v}. Save to keep it.`); }
-        else toast(isPublic ? 'Couldn\'t look up your public IP. Pick an address from the menu instead.' : 'No network connection found.', 'bad');
+        await loadNetwork(true);
+        const v = network.publicIp;
+        if (v) {
+          set(v);
+          toast(listens
+            ? `Filled in ${v}. This may be the address the server listens on. If it won't start, choose 0.0.0.0 or your local IP from the menu.`
+            : `Filled in ${v}. Save to keep it.`, listens ? 'warn' : '');
+        } else toast('Couldn\'t look up your public IP. Pick an address from the menu instead.', 'bad');
       } catch (e) { toast(e.message, 'bad'); }
       fill.disabled = false;
     };
@@ -1419,8 +1425,54 @@ async function appSettingsDialog() {
     body.replaceChildren();
     const remote = h('input', { type: 'checkbox', ...(st.remoteAccess ? { checked: true } : {}) });
     const port = h('input', { class: 'input mono', type: 'number', min: 1024, max: 65535, value: st.configuredPort });
-    const pw = h('input', { class: 'input', type: 'password', placeholder: st.hasPassword ? 'Enter a new password to change it' : 'At least 6 characters', autocomplete: 'new-password' });
+    const pw = h('input', { class: 'input', type: 'password', placeholder: st.hasPassword ? 'Enter a new password to change it' : 'At least 6 characters (10 for internet access)', autocomplete: 'new-password' });
     const tray = h('input', { type: 'checkbox', ...(st.minimizeToTray ? { checked: true } : {}) });
+
+    // "Reach Hostbay from the internet": opens Hostbay's own port on the router with UPnP.
+    // The switch applies immediately; the status box follows the router's answer.
+    const internetGroup = () => {
+      const inet = h('input', { type: 'checkbox', ...(st.internetAccess ? { checked: true } : {}) });
+      const blocked = !st.listeningOnLan ? 'Turn on remote access and save first.'
+        : !st.longPassword ? `Set a password of at least ${st.minInternetPasswordLength} characters first.` : null;
+      inet.disabled = !!blocked && !st.internetAccess;
+      const status = h('div', { class: 'fwd-status' });
+      const showStatus = f => {
+        status.replaceChildren();
+        if (!st.internetAccess || !f || f.state === 'off') return;
+        if (f.state === 'working') { status.append(h('div', { class: 'notice' }, f.message)); return; }
+        if (f.state === 'failed') { status.append(h('div', { class: 'notice bad' }, f.message)); return; }
+        const url = f.externalIp ? `http://${f.externalIp}:${f.port}` : null;
+        status.append(h('div', { class: `notice ${f.state === 'limited' ? 'warn' : ''}` }, f.message));
+        if (url) status.append(h('div', { class: 'fwd-url' }, h('span', { class: 'dim' }, 'Open from anywhere:'), copyLine(url, 'the internet link')));
+      };
+      const poll = async (tries = 0) => {
+        try { st = await api('GET', '/api/settings'); } catch { return; }
+        showStatus(st.forwarding);
+        if (st.forwarding?.state === 'working' && tries < 20 && document.body.contains(status)) setTimeout(() => poll(tries + 1), 1000);
+      };
+      inet.addEventListener('change', async () => {
+        try {
+          await api('PUT', '/api/settings', { internetAccess: inet.checked });
+          st.internetAccess = inet.checked;
+          toast(inet.checked ? 'Opening Hostbay\'s port on your router…' : 'Closed Hostbay\'s port on your router.');
+          setTimeout(() => poll(), 600);
+        } catch (e) { inet.checked = !inet.checked; toast(e.message, 'bad'); }
+      });
+      showStatus(st.forwarding);
+      if (st.forwarding?.state === 'working') setTimeout(() => poll(), 1000);
+      return h('div', { class: 'set-group' },
+        h('h2', {}, 'Reach Hostbay from the internet'),
+        h('p', {}, 'Hostbay can ask your router to open its port (UPnP), so you can manage your servers from anywhere, not just your home network. Your game servers\' ports aren\'t touched.'),
+        h('div', { class: 'notice warn', style: { margin: '0 0 12px' } },
+          'Anyone on the internet will be able to reach Hostbay\'s sign-in page, and Hostbay can start programs on this PC. '
+          + 'The connection isn\'t encrypted (plain http), so only sign in from networks you trust, and use a long password you don\'t use anywhere else.'),
+        h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Open port on my router'),
+            h('div', {},
+              h('div', { class: 'inline' }, h('span', { class: 'toggle' }, inet, h('span')),
+                h('span', { class: 'dim' }, blocked && !st.internetAccess ? blocked : st.internetAccess ? `On. Port ${st.port} stays open while Hostbay runs.` : 'Off.')),
+              status))));
+    };
 
     // This PC's addresses, each with a Copy button. Filled in once the public IP lookup returns.
     const copyLine = (value, what) => h('div', { class: 'addr-line' }, h('code', {}, value),
@@ -1463,6 +1515,7 @@ async function appSettingsDialog() {
           h('div', { class: 'set-row' }, h('label', {}, 'Port'), h('div', {}, port,
             h('div', { class: 'help' }, st.port !== st.configuredPort ? `Port ${st.configuredPort} was busy, so Hostbay is using ${st.port}.` : 'When you first turn on remote access, Windows asks whether to allow Hostbay through the firewall. Allow it on private networks.'))),
         )),
+      internetGroup(),
       h('div', { class: 'set-group' },
         h('h2', {}, 'Window'),
         h('div', { class: 'set-rows' },

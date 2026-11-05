@@ -24,6 +24,9 @@ public sealed class AuthService
     /// <summary>One-time-per-launch secret the desktop window uses to sign in.</summary>
     public string LocalToken { get; }
 
+    /// <summary>Exposing Hostbay to the internet needs a longer password than the home network does.</summary>
+    public const int MinInternetPasswordLength = 10;
+
     public bool HasPassword => !string.IsNullOrEmpty(_mgr.Settings.PasswordHash);
 
     public void SetPassword(string password, string? keepSession = null)
@@ -32,6 +35,8 @@ public sealed class AuthService
         var salt = RandomNumberGenerator.GetBytes(16);
         _mgr.Settings.PasswordSalt = Convert.ToBase64String(salt);
         _mgr.Settings.PasswordHash = Convert.ToBase64String(Hash(password, salt));
+        _mgr.Settings.LongPassword = password.Length >= MinInternetPasswordLength;
+        if (!_mgr.Settings.LongPassword) _mgr.Settings.InternetAccess = false; // too short to face the internet
         _mgr.Save();
         // Sign out every other browser when the password changes, but keep whoever changed it.
         foreach (var id in _sessions.Keys) if (id != keepSession) _sessions.TryRemove(id, out _);

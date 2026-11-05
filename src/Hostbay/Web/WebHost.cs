@@ -28,6 +28,8 @@ public sealed class WebHost
     }
 
     public AuthService Auth { get; }
+    /// <summary>Opens Hostbay's own port on the router (UPnP) when internet access is on.</summary>
+    public PortForwarder Forwarder { get; } = new();
     public int Port { get; private set; }
     public bool ListeningOnLan { get; private set; }
     public string LocalUrl => $"http://127.0.0.1:{Port}";
@@ -48,6 +50,7 @@ public sealed class WebHost
                 var app = Build(port, lan);
                 await app.StartAsync();
                 _app = app; Port = port; ListeningOnLan = lan;
+                ApplyForwarding();
                 return;
             }
             catch (Exception ex) when (ex is IOException || ex.InnerException is SocketException || ex is SocketException)
@@ -73,7 +76,17 @@ public sealed class WebHost
 
     public async Task StopAsync()
     {
+        await Forwarder.CloseAsync(); // take the port back off the router on exit
         if (_app != null) { using (var cts = new System.Threading.CancellationTokenSource(2000)) await _app.StopAsync(cts.Token); await _app.DisposeAsync(); _app = null; }
+    }
+
+    /// <summary>Opens or closes the router port to match the settings: needs remote access, a long password and the switch on.</summary>
+    public void ApplyForwarding()
+    {
+        var s = _mgr.Settings;
+        bool want = s.InternetAccess && s.LongPassword && ListeningOnLan;
+        if (want) Forwarder.Open(Port);
+        else if (Forwarder.Status.State != "off") _ = Forwarder.CloseAsync();
     }
 
     private WebApplication Build(int port, bool lan)
