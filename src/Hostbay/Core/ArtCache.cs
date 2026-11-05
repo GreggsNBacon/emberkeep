@@ -92,6 +92,45 @@ public static class ArtCache
         catch { return null; }
     }
 
+    private static int _startupScanDone;
+
+    /// <summary>
+    /// Custom servers have no catalog art, and the Steam app they came from is usually a dedicated-server tool with no
+    /// pictures. For those, look the game up on the Steam store by the server's (tidied) name and use its art.
+    /// With no <paramref name="onlyId"/>, checks every custom server once per run.
+    /// </summary>
+    public static async Task AutoDetectAsync(ServerManager mgr, string? onlyId = null)
+    {
+        if (onlyId == null && Interlocked.Exchange(ref _startupScanDone, 1) == 1) return;
+        var targets = mgr.Settings.Servers.Where(s => (onlyId == null || s.Id == onlyId)
+            && s.ArtAppId is null && GameCatalog.Get(s.GameId).ArtAppId is null).ToList();
+        foreach (var s in targets)
+        {
+            try
+            {
+                if (s.SteamAppId is int own && await GetAsync(own, "header") != null) continue; // its own app has art: keep it
+                if (await FindGameAsync(s.Name) is int found) mgr.SetArt(s.Id, found);
+            }
+            catch { }
+        }
+    }
+
+    /// <summary>The Steam game best matching a server name, ignoring "Dedicated Server" and similar. Null if nothing is a clear match.</summary>
+    public static async Task<int?> FindGameAsync(string serverName)
+    {
+        var name = ServerNames.Clean(serverName);
+        static string N(string x) => System.Text.RegularExpressions.Regex.Replace(x.ToLowerInvariant(), "[^a-z0-9]", "");
+        var want = N(name);
+        if (want.Length < 3) return null;
+        List<SearchResult> results;
+        try { results = await SearchAsync(name); } catch { return null; }
+        // Exact name first; otherwise a game whose name starts with it, skipping soundtracks, demos, servers and the like.
+        var extras = new System.Text.RegularExpressions.Regex(@"soundtrack|\bost\b|\bdlc\b|demo|playtest|dedicated|\bserver\b|artbook|season pass|supporter", System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+        var hit = results.FirstOrDefault(r => N(r.Name) == want)
+               ?? results.FirstOrDefault(r => !extras.IsMatch(r.Name) && N(r.Name).StartsWith(want));
+        return hit?.Id;
+    }
+
     public sealed record SearchResult(int Id, string Name);
 
     /// <summary>Searches the Steam store by name, so custom servers can pick their game's art.</summary>

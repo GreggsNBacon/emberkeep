@@ -69,6 +69,8 @@ public sealed class AppSettings
     public List<UserGroup> Groups { get; set; } = new();
     public List<ServerInstance> Servers { get; set; } = new();
     public DiscordSettings Discord { get; set; } = new();
+    /// <summary>Set once Steam's "Dedicated Server" suffixes have been taken off existing server names.</summary>
+    public bool NamesTidied { get; set; }
 }
 
 public sealed record LogLine(long Seq, DateTime Time, string Source, string Text);

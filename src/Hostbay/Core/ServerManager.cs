@@ -40,6 +40,7 @@ public sealed class ServerManager : IDisposable
     {
         Directory.CreateDirectory(DataDir);
         Settings = Load();
+        TidyNames();
         foreach (var s in Settings.Servers) Attach(s);
         DetectRunning();
         _statsTimer = new Timer(_ => Tick(), null, 2000, 2000);
@@ -58,6 +59,15 @@ public sealed class ServerManager : IDisposable
             try { File.Copy(SettingsPath, SettingsPath + ".broken-" + DateTime.Now.ToString("yyyyMMddHHmmss")); } catch { }
         }
         return new AppSettings();
+    }
+
+    /// <summary>One-time: "Palworld Dedicated Server" → "Palworld" for servers added before names were tidied on add.</summary>
+    private void TidyNames()
+    {
+        if (Settings.NamesTidied) return;
+        foreach (var s in Settings.Servers) s.Name = ServerNames.CleanSteamSuffix(s.Name);
+        Settings.NamesTidied = true;
+        try { Save(); } catch { }
     }
 
     public void Save()
@@ -103,6 +113,16 @@ public sealed class ServerManager : IDisposable
             Settings.Servers[i] = updated;
         }
         rt.Config = updated;
+        Save();
+        Changed?.Invoke();
+    }
+
+    /// <summary>Sets a server's artwork (found automatically) and tells the UI.</summary>
+    public void SetArt(string id, int appId)
+    {
+        var rt = Get(id);
+        if (rt == null || rt.Config.ArtAppId != null) return; // the user picked something meanwhile
+        rt.Config.ArtAppId = appId;
         Save();
         Changed?.Invoke();
     }

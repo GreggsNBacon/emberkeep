@@ -87,15 +87,39 @@ public static class RouterPorts
             var j = JoinInfo.Resolve(s);
             return j.Port is int jp ? (new() { new PortEntry("TCP/UDP", jp, jp) }, "the join port") : (new(), "none");
         }
+        // Start from the game's usual list, then apply every port set in the launch arguments or config files.
         var entries = Parse(game.ForwardPorts);
-        int? actual = JoinInfo.Resolve(s).Port;
-        if (actual is int a && DefaultJoinPort.TryGetValue(s.GameId, out int def) && a != def)
+        var detected = JoinInfo.Ports(s);
+        // A join port typed in Settings counts too: it moves the game's main port.
+        var join = JoinInfo.Resolve(s);
+        if (join.Source == "set in Settings" && join.Port is int jp2 && DefaultJoinPort.TryGetValue(s.GameId, out int jdef))
         {
-            int delta = a - def;
-            entries = entries.Select(e => e.From <= def && def <= e.To && e.From + delta >= 1 && e.To + delta <= 65535
-                ? e with { From = e.From + delta, To = e.To + delta } : e).ToList();
-            return (entries, $"{game.Name}'s ports, moved to join port {a}");
+            detected.RemoveAll(d => d.Default == jdef);
+            foreach (var e in entries.Where(e => e.From <= jdef && jdef <= e.To).ToList())
+                detected.Add(new DetectedPort("Join", e.Protocol, jdef, jp2, "Settings"));
         }
-        return (entries, $"{game.Name}'s usual ports");
+
+        var moved = new HashSet<int>(); // indexes of entries already shifted
+        var sources = new List<string>();
+        // TCP/UDP ports are handled one protocol at a time, so lists like "TCP 26900, UDP 26900-26903" move together.
+        foreach (var d in detected.SelectMany(d => d.Protocol == "TCP/UDP" ? new[] { d with { Protocol = "TCP" }, d with { Protocol = "UDP" } } : new[] { d }))
+        {
+            if (d.Port != d.Default) sources.Add(d.Source);
+            // Already opened by an entry placed for another setting (e.g. Enshrouded's query port right after its game port).
+            if (moved.Any(k => entries[k].From <= d.Port && d.Port <= entries[k].To && ProtoCovers(entries[k].Protocol, d.Protocol))) continue;
+            int delta = d.Port - d.Default, i = -1;
+            for (int k = 0; k < entries.Count; k++)
+                if (!moved.Contains(k) && entries[k].From <= d.Default && d.Default <= entries[k].To && ProtoCovers(entries[k].Protocol, d.Protocol)) { i = k; break; }
+            if (i >= 0 && entries[i].From + delta >= 1 && entries[i].To + delta <= 65535)
+            {
+                entries[i] = entries[i] with { From = entries[i].From + delta, To = entries[i].To + delta };
+                moved.Add(i);
+            }
+            else { entries.Add(new PortEntry(d.Protocol, d.Port, d.Port)); moved.Add(entries.Count - 1); sources.Add(d.Source); } // not in the usual list, e.g. Minecraft's query port
+        }
+        var from = sources.Where(x => x.Length > 0).Distinct().ToList();
+        return (entries, from.Count > 0 ? $"{game.Name}'s ports, as set in {string.Join(" and ", from)}" : $"{game.Name}'s usual ports");
     }
+
+    private static bool ProtoCovers(string entryProto, string proto) => entryProto == "TCP/UDP" || entryProto == proto;
 }

@@ -57,7 +57,10 @@ public sealed class DiscordBot : IDisposable
     /// <summary>View channel, send messages, embed links, read message history.</summary>
     public const long InvitePermissions = 1024 | 2048 | 16384 | 65536;
 
+    /// <summary>REST bodies: leave out nulls (optional fields such as an embed's thumbnail).</summary>
     private static readonly JsonSerializerOptions Out = new() { DefaultIgnoreCondition = JsonIgnoreCondition.WhenWritingNull };
+    /// <summary>Gateway messages: keep nulls. Discord requires fields like "since" and a heartbeat's "d" even when null, and closes the connection (4002) without them.</summary>
+    private static readonly JsonSerializerOptions GatewayJson = new();
     private static readonly byte[] Entropy = Encoding.UTF8.GetBytes("Hostbay.Discord.v1");
 
     private readonly ServerManager _mgr;
@@ -75,6 +78,7 @@ public sealed class DiscordBot : IDisposable
     private string _state = "off", _message = "Not set up.";
     private string? _boardError;
     private int _boardPending;
+    private volatile bool _sessionReady;
 
     public DiscordBot(ServerManager mgr)
     {
@@ -191,6 +195,7 @@ public sealed class DiscordBot : IDisposable
             }
             catch (Exception ex)
             {
+                if (_sessionReady) backoff = 1; // it was working: this is a one-off drop, not a failing connection
                 SetState("connecting", $"Lost the connection to Discord ({ex.Message}). Retrying in {backoff}s…");
             }
             _guilds.Clear();
@@ -201,6 +206,7 @@ public sealed class DiscordBot : IDisposable
 
     private async Task ConnectOnceAsync(CancellationToken ct)
     {
+        _sessionReady = false;
         var gw = await RestAsync(HttpMethod.Get, "/gateway/bot", null);
         var url = gw.GetProperty("url").GetString() + "/?v=10&encoding=json";
         using var ws = new ClientWebSocket();
@@ -287,7 +293,7 @@ public sealed class DiscordBot : IDisposable
 
     private async Task SendAsync(ClientWebSocket ws, object payload)
     {
-        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, Out);
+        var bytes = JsonSerializer.SerializeToUtf8Bytes(payload, GatewayJson);
         await _sendLock.WaitAsync();
         try { if (ws.State == WebSocketState.Open) await ws.SendAsync(bytes, WebSocketMessageType.Text, true, CancellationToken.None); }
         finally { _sendLock.Release(); }
@@ -298,6 +304,7 @@ public sealed class DiscordBot : IDisposable
         switch (type)
         {
             case "READY":
+                _sessionReady = true;
                 _guilds.Clear();
                 foreach (var g in d.GetProperty("guilds").EnumerateArray()) _guilds[g.GetProperty("id").GetString()!] = 0;
                 if (d.TryGetProperty("user", out var u) && u.GetProperty("username").GetString() is { } name && name != S.BotName) { S.BotName = name; _mgr.Save(); }

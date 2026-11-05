@@ -70,6 +70,7 @@ public static class Api
             var game = GameCatalog.Get(req.GameId ?? "generic");
             var inst = GameCatalog.CreateInstance(game, Path.GetFullPath(req.InstallDir), string.IsNullOrWhiteSpace(req.Name) ? null : req.Name.Trim(), req.SteamAppId);
             var rt = mgr.Add(inst);
+            _ = ArtCache.AutoDetectAsync(mgr, inst.Id); // custom servers: find the game's artwork by name
             return Results.Ok(Detail(rt, WebHost.Who(ctx)));
         }).Need(Permissions.Launch);
 

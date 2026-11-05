@@ -58,6 +58,7 @@ public sealed class WebHost
                 _app = app; Port = port; ListeningOnLan = lan;
                 ApplyForwarding();
                 Discord.Start();
+                _ = Task.Run(() => ArtCache.AutoDetectAsync(_mgr)); // once per run: art for custom servers that have none
                 return;
             }
             catch (Exception ex) when (ex is IOException || ex.InnerException is SocketException || ex is SocketException)

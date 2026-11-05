@@ -1224,7 +1224,7 @@ function renderSettings() {
     placeholder: defaultArt() ? `Default: ${defaultArt()}` : 'Steam app ID',
   });
   const findArt = h('button', { class: 'btn', type: 'button', onclick: async () => {
-    const id = await steamGamePicker(c.name.replace(/\b(dedicated\s+)?server\b/ig, '').trim() || game(c.gameId).name);
+    const id = await steamGamePicker(cleanServerName(c.name) || game(c.gameId).name);
     if (id) { c.artAppId = id; artInput.value = id; drawArt(); }
   } }, 'Find game on Steam');
   gameSel.addEventListener('change', () => { c.gameId = gameSel.value; drawArt(); });
@@ -1472,6 +1472,19 @@ function folderPanel(panel, m) {
 }
 
 // ---------------- Steam game picker (artwork) ----------------
+
+// "Abiotic Factor - Dedicated Server" -> "Abiotic Factor" (same rules as ServerNames.Clean on the host).
+function cleanServerName(name) {
+  let s = String(name || '').trim();
+  for (let i = 0; i < 4; i++) {
+    const next = s.replace(/[\s\-–—:|_,]*[([]?\s*\b(?:dedicated\s+server(?:\s+tool)?|dedicated|server\s+tool|server|ds|for\s+windows|windows\s+x64)\s*[)\]]?\s*$/i, '')
+      .replace(/[\s\-–—:|_,]+$/, '');
+    if (next === s) break;
+    if (!next) return String(name || '').trim();
+    s = next;
+  }
+  return s;
+}
 
 // Searches the Steam store by name and resolves to the chosen app ID, or null.
 function steamGamePicker(initial) {

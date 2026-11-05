@@ -20,7 +20,7 @@ var messages = new ConcurrentDictionary<string, JsonNode>();   // id -> message 
 var callbacks = new ConcurrentDictionary<string, JsonNode>();  // interaction id -> response
 JsonNode? commands = null;
 JsonNode? presence = null;
-int identifies = 0, nextId = 1000;
+int identifies = 0, nextId = 1000, decodeErrors = 0;
 WebSocket? socket = null;
 var sendLock = new SemaphoreSlim(1, 1);
 long seq = 0;
@@ -86,6 +86,21 @@ app.Map("/gw", async (HttpContext c) =>
         if (r.MessageType == WebSocketMessageType.Close) break;
         var msg = JsonNode.Parse(ms.ToArray())!;
         int op = msg["op"]!.GetValue<int>();
+        // Like the real gateway, required fields must be present even when null; otherwise close with 4002.
+        static bool Has(JsonNode? n, params string[] keys) => n is JsonObject o && keys.All(o.ContainsKey);
+        bool valid = op switch
+        {
+            1 => Has(msg, "op", "d"),
+            2 => Has(msg["d"], "token", "intents", "properties"), // the real gateway accepted our sign-in, so stay lenient here
+            3 => Has(msg["d"], "since", "activities", "status", "afk"),
+            _ => true,
+        };
+        if (!valid)
+        {
+            decodeErrors++;
+            await ws.CloseAsync((WebSocketCloseStatus)4002, "Error while decoding payload.", CancellationToken.None);
+            break;
+        }
         if (op == 1) await Send(new { op = 11 });
         else if (op == 2)
         {
@@ -114,6 +129,7 @@ app.MapGet("/_test/state", () => Results.Ok(new
 {
     connected = socket?.State == WebSocketState.Open,
     identifies,
+    decodeErrors,
     commands,
     presence,
     messages = messages.ToDictionary(kv => kv.Key, kv => kv.Value),

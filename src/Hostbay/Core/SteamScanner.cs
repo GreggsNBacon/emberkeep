@@ -90,7 +90,7 @@ public static class SteamScanner
                     if (!looksLikeServer) continue;
                     game = GameCatalog.DetectInFolder(dir).FirstOrDefault() ?? GameCatalog.Get("generic");
                 }
-                results.Add(new ScanCandidate(game.Id, game.Name, name, dir, appId, known.Contains(Normalize(dir)), "Steam"));
+                results.Add(new ScanCandidate(game.Id, game.Name, ServerNames.Clean(name), dir, appId, known.Contains(Normalize(dir)), "Steam"));
             }
         }
         return results.OrderBy(r => r.AlreadyAdded).ThenBy(r => r.Name).ToList();
@@ -102,7 +102,7 @@ public static class SteamScanner
         var games = GameCatalog.DetectInFolder(dir);
         if (games.Count == 0) games.Add(GameCatalog.Get("generic"));
         var folderName = Path.GetFileName(dir.TrimEnd('\\', '/'));
-        return games.Select(g => new ScanCandidate(g.Id, g.Name, g.Id == "generic" ? folderName : g.Name, dir,
+        return games.Select(g => new ScanCandidate(g.Id, g.Name, g.Id == "generic" ? ServerNames.Clean(folderName) : g.Name, dir,
             g.SteamAppIds.FirstOrDefault() is var a && a != 0 ? a : null, known.Contains(Normalize(dir)), "Folder")).ToList();
     }
 
