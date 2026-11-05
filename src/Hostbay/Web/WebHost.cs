@@ -25,11 +25,14 @@ public sealed class WebHost
     {
         _mgr = mgr;
         Auth = new AuthService(mgr);
+        Ports = new RouterPortService(mgr);
     }
 
     public AuthService Auth { get; }
     /// <summary>Opens Hostbay's own port on the router (UPnP) when internet access is on.</summary>
     public PortForwarder Forwarder { get; } = new();
+    /// <summary>Opens servers' ports on the router, through PortHop when available.</summary>
+    public RouterPortService Ports { get; }
     public int Port { get; private set; }
     public bool ListeningOnLan { get; private set; }
     public string LocalUrl => $"http://127.0.0.1:{Port}";

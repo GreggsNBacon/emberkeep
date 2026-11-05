@@ -37,6 +37,10 @@ public static class Upnp
     /// <summary>Asks the local network for a UPnP router. Returns null if none answers within the timeout.</summary>
     public static async Task<UpnpGateway?> DiscoverAsync(TimeSpan timeout, CancellationToken ct = default)
     {
+        // Test hook: talk to a fake router's description URL (may be on loopback) instead of searching the network.
+        if (Environment.GetEnvironmentVariable("HOSTBAY_TEST_GATEWAY") is { Length: > 0 } testUrl)
+            return await ReadDescriptionAsync(new Uri(testUrl), ct);
+
         var locations = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
         // Search from each home-network address so the request leaves on the right adapter.
         var sources = NetworkInfo.LocalAddresses().Where(a => a.Kind == "lan").Select(a => IPAddress.Parse(a.Address)).ToList();
@@ -110,6 +114,7 @@ public static class Upnp
 
     private static bool IsPrivate(IPAddress a)
     {
+        if (IPAddress.IsLoopback(a) && Environment.GetEnvironmentVariable("HOSTBAY_TEST_GATEWAY") is { Length: > 0 }) return true;
         var b = a.GetAddressBytes();
         return a.AddressFamily == AddressFamily.InterNetwork &&
                (b[0] == 10 || (b[0] == 172 && b[1] >= 16 && b[1] <= 31) || (b[0] == 192 && b[1] == 168) || (b[0] == 100 && b[1] >= 64 && b[1] <= 127));
@@ -135,6 +140,23 @@ public static class Upnp
             ["NewExternalPort"] = externalPort.ToString(),
             ["NewProtocol"] = protocol,
         }, ct);
+
+    /// <summary>The router's entry for one port: (target IP, description), or null if it has none (error 714).</summary>
+    public static async Task<(string InternalClient, string Description)?> GetSpecificMappingAsync(UpnpGateway gw, int externalPort, string protocol, CancellationToken ct = default)
+    {
+        try
+        {
+            var xml = await SoapAsync(gw, "GetSpecificPortMappingEntry", new()
+            {
+                ["NewRemoteHost"] = "",
+                ["NewExternalPort"] = externalPort.ToString(),
+                ["NewProtocol"] = protocol,
+            }, ct);
+            string V(string name) => xml.Descendants().FirstOrDefault(e => e.Name.LocalName == name)?.Value ?? "";
+            return (V("NewInternalClient"), V("NewPortMappingDescription"));
+        }
+        catch (UpnpException ex) when (ex.Code is 714 or 713) { return null; }
+    }
 
     public static async Task<string?> GetExternalIpAsync(UpnpGateway gw, CancellationToken ct = default)
     {

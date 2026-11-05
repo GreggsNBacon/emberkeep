@@ -491,3 +491,19 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .fwd-status { display: flex; flex-direction: column; gap: 8px; margin-top: 10px; }
 .fwd-status .notice { margin: 0; }
 .fwd-url { display: flex; align-items: center; gap: 10px; flex-wrap: wrap; }
+
+/* ---------- router ports (PortHop / built in) ---------- */
+.stats .stat-ports { text-align: right; }
+.stat-ports dd { display: flex; align-items: center; gap: 6px; justify-content: flex-end; }
+.ports-pill { display: inline-flex; align-items: center; gap: 7px; font: 600 14px var(--display); white-space: nowrap; }
+.ports-dot { width: 9px; height: 9px; border-radius: 50%; background: var(--fog-faint); flex: none; }
+.ports-open .ports-dot { background: var(--run); box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 22%, transparent); }
+.ports-partial .ports-dot { background: var(--warn); }
+.ports-unknown .ports-dot { background: var(--bad); }
+.ports-working .ports-dot { background: var(--brand-2); animation: pulse 1s ease-in-out infinite; }
+.ports-open { color: #bff5dc; }
+@keyframes pulse { 50% { opacity: .35; } }
+@media (max-width: 860px) {
+  .stats .stat-ports { text-align: left; }
+  .stat-ports dd { justify-content: flex-start; }
+}

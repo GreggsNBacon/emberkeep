@@ -45,6 +45,10 @@ public sealed class ServerInstance
     public int? SteamAppId { get; set; }
     /// <summary>Port players connect to. Null means detect it from the launch arguments or game config.</summary>
     public int? JoinPort { get; set; }
+    /// <summary>Ports to open on the router, e.g. "UDP 2456-2458, TCP 8888". Empty means use the game's list.</summary>
+    public string? ForwardPorts { get; set; }
+    /// <summary>Open the router ports when the server starts and close them when it stops.</summary>
+    public bool ForwardWhileRunning { get; set; }
     /// <summary>Steam app ID whose artwork to show. Null means use the game's own.</summary>
     public int? ArtAppId { get; set; }
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;

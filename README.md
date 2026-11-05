@@ -11,6 +11,7 @@ A Windows app for running game servers for you and your friends. Run `Hostbay.ex
 - **Shows live logs.** The server's console output and its log files stream in real time, with filtering and timestamps.
 - **Offers remote access.** Set a password, turn on remote access, then open `http://<host-ip>:8765` from another PC or your phone.
 - **Game artwork.** Each game's Steam art appears as its sidebar badge and as a banner behind the server header. Pictures are downloaded once from Steam and cached in `%APPDATA%Hostbayrt`. Custom servers can pick any Steam game's art in Settings → Artwork.
+- **Opens router ports with PortHop.** Each server has a Router ports control next to its join address: open or close the ports friends need, with per-port status. Hostbay asks PortHop to do it (starting PortHop in the background if needed), so every forward also shows in PortHop's list and tray and is restored after a router reboot. Without PortHop, Hostbay forwards with its own UPnP. Port lists match PortHop's game list, follow a server's actual join port, and can be edited per server; an optional switch opens them while the server runs. The installer includes PortHop, which also works on its own.
 - **Shows join addresses.** Each server shows the address friends join with (your public IP by default, plus the right port, read from the launch arguments or game config), with Copy buttons for local network, VPN and public addresses. IP settings in config files get a "Fill current IP" button. App settings lists all of this PC's addresses with Copy buttons.
 - **Picks up running servers.** If a server was already running when Hostbay started, Hostbay detects it and can stop it and show its log files.
 
@@ -58,6 +59,10 @@ The installer's source is in `installer/`. `Package.wxs` defines the package. Th
 - **`Desktop/`**: the WinForms window hosting WebView2, the tray icon, single-instance handling, and a graceful stop of all servers on exit.
 - **`wwwroot/`**: the UI, in plain HTML, CSS and JavaScript embedded in the exe, with no build step.
 - **`tests/FakeServer`**: a stand-in game server (console output, a log file, console input, Ctrl+C handling, an RCON server) used to exercise Hostbay without installing real games.
+
+## PortHop
+
+PortHop (`..PortHop`) is a separate app for forwarding game ports. Hostbay finds a running copy through `%LOCALAPPDATA%PortHopinstance.json` and uses its local API (`/api/hello`, `/api/forwarded`, `/api/forward`, `/api/remove`). Forwards Hostbay makes are named `Hostbay: <server name>` in PortHop. `build.ps1` builds PortHop from source when Node is available and bundles it into the installer.
 
 ## Not in this version
 

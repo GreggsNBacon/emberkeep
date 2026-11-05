@@ -4,3 +4,4 @@ publish/
 dist/
 *.user
 .vs/
+releases/

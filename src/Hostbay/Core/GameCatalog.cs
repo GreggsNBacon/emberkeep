@@ -16,6 +16,11 @@ public sealed class GameDefinition
     public required string Badge { get; init; }
     public required string Color { get; init; }
     public int[] SteamAppIds { get; init; } = [];
+    /// <summary>
+    /// Ports to open on the router for this game, e.g. "UDP 2456-2458, TCP 8888" (same lists PortHop uses).
+    /// Entries containing the default join port move with it when a server runs on a different port.
+    /// </summary>
+    public string? ForwardPorts { get; init; }
     /// <summary>The game's own Steam app ID, used for artwork (server tools have no store art).</summary>
     public int? ArtAppId { get; init; }
     /// <summary>Candidate executables relative to the install dir; the first that exists is used.</summary>
@@ -48,6 +53,7 @@ public static class GameCatalog
         new()
         {
             Id = "palworld", Name = "Palworld", Badge = "PW", Color = "#3fb6ff",
+            ForwardPorts = "UDP 8211",
             ArtAppId = 1623730,
             SteamAppIds = [2394010],
             Executables = ["PalServer.exe"],
@@ -81,6 +87,7 @@ public static class GameCatalog
         new()
         {
             Id = "enshrouded", Name = "Enshrouded", Badge = "EN", Color = "#c792ea",
+            ForwardPorts = "UDP 15636-15637",
             ArtAppId = 1203620,
             SteamAppIds = [2278520],
             Executables = ["enshrouded_server.exe"],
@@ -93,6 +100,7 @@ public static class GameCatalog
         new()
         {
             Id = "valheim", Name = "Valheim", Badge = "VH", Color = "#f2b84b",
+            ForwardPorts = "UDP 2456-2458",
             ArtAppId = 892970,
             SteamAppIds = [896660],
             Executables = ["valheim_server.exe"],
@@ -112,6 +120,7 @@ public static class GameCatalog
         new()
         {
             Id = "satisfactory", Name = "Satisfactory", Badge = "SF", Color = "#f58b3c",
+            ForwardPorts = "TCP/UDP 7777, TCP 8888",
             ArtAppId = 526870,
             SteamAppIds = [1690800],
             Executables = ["FactoryServer.exe"],
@@ -131,6 +140,7 @@ public static class GameCatalog
         new()
         {
             Id = "minecraft-java", Name = "Minecraft (Java)", Badge = "MC", Color = "#62c462",
+            ForwardPorts = "TCP 25565",
             Executables = ["run.bat"],
             DefaultArguments = "-Xms1G -Xmx4G -jar server.jar nogui",
             DetectFiles = ["server.properties", "eula.txt", "user_jvm_args.txt"],
@@ -147,6 +157,7 @@ public static class GameCatalog
         new()
         {
             Id = "minecraft-bedrock", Name = "Minecraft (Bedrock)", Badge = "MB", Color = "#4fae5b",
+            ForwardPorts = "UDP 19132-19133",
             Executables = ["bedrock_server.exe"],
             DetectFiles = ["bedrock_server.exe"],
             ConfigFiles = ["server.properties", "allowlist.json", "permissions.json"],
@@ -156,6 +167,7 @@ public static class GameCatalog
         new()
         {
             Id = "vrising", Name = "V Rising", Badge = "VR", Color = "#e0424b",
+            ForwardPorts = "UDP 9876-9877",
             ArtAppId = 1604030,
             SteamAppIds = [1829350],
             Executables = ["VRisingServer.exe"],
@@ -185,6 +197,7 @@ public static class GameCatalog
         new()
         {
             Id = "7dtd", Name = "7 Days to Die", Badge = "7D", Color = "#b5523b",
+            ForwardPorts = "TCP 26900, UDP 26900-26903",
             ArtAppId = 251570,
             SteamAppIds = [294420],
             Executables = ["7DaysToDieServer.exe"],
@@ -210,6 +223,7 @@ public static class GameCatalog
         new()
         {
             Id = "zomboid", Name = "Project Zomboid", Badge = "PZ", Color = "#9bbf3a",
+            ForwardPorts = "UDP 16261-16262",
             ArtAppId = 108600,
             SteamAppIds = [380870],
             Executables = ["StartServer64_nosteam.bat", "StartServer64.bat"],
@@ -229,6 +243,7 @@ public static class GameCatalog
         new()
         {
             Id = "terraria", Name = "Terraria", Badge = "TR", Color = "#5ea84a",
+            ForwardPorts = "TCP 7777",
             ArtAppId = 105600,
             SteamAppIds = [105600],
             Executables = ["TerrariaServer.exe"],
@@ -242,6 +257,7 @@ public static class GameCatalog
         new()
         {
             Id = "ark-se", Name = "ARK: Survival Evolved", Badge = "AE", Color = "#4fb0a8",
+            ForwardPorts = "UDP 7777-7778, UDP 27015",
             ArtAppId = 346110,
             SteamAppIds = [376030],
             Executables = ["ShooterGame\\Binaries\\Win64\\ShooterGameServer.exe"],
@@ -256,6 +272,7 @@ public static class GameCatalog
         new()
         {
             Id = "ark-sa", Name = "ARK: Survival Ascended", Badge = "AA", Color = "#38a3c9",
+            ForwardPorts = "UDP 7777, UDP 27015",
             ArtAppId = 2399830,
             SteamAppIds = [2430930],
             Executables = ["ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe"],
@@ -270,6 +287,7 @@ public static class GameCatalog
         new()
         {
             Id = "sotf", Name = "Sons of the Forest", Badge = "SO", Color = "#7fa36b",
+            ForwardPorts = "UDP 8766, UDP 27016, UDP 9700",
             ArtAppId = 1326470,
             SteamAppIds = [2465200],
             Executables = ["SonsOfTheForestDS.exe"],
@@ -280,6 +298,7 @@ public static class GameCatalog
         new()
         {
             Id = "conan", Name = "Conan Exiles", Badge = "CE", Color = "#d39b4a",
+            ForwardPorts = "UDP 7777-7778, UDP 27015",
             ArtAppId = 440900,
             SteamAppIds = [443030],
             Executables = ["ConanSandboxServer.exe"],
@@ -312,6 +331,7 @@ public static class GameCatalog
         new()
         {
             Id = "rust", Name = "Rust", Badge = "RS", Color = "#cd412b",
+            ForwardPorts = "UDP 28015",
             ArtAppId = 252490,
             SteamAppIds = [258550],
             Executables = ["RustDedicated.exe"],

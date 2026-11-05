@@ -46,6 +46,11 @@ public static class Api
             body.ExtraLogFiles ??= new();
             body.Rcon ??= new();
             body.StopTimeoutSeconds = Math.Clamp(body.StopTimeoutSeconds, 5, 900);
+            if (!string.IsNullOrWhiteSpace(body.ForwardPorts))
+            {
+                try { body.ForwardPorts = RouterPorts.Format(RouterPorts.Parse(body.ForwardPorts)); } // tidy: "udp 1-2,tcp 3" -> "UDP 1-2, TCP 3"
+                catch (FormatException ex) { return Error($"Router ports: {ex.Message}"); }
+            }
             mgr.Update(id, body);
             return Results.Ok(Detail(rt));
         });
@@ -288,6 +293,22 @@ public static class Api
 
         api.MapGet("/servers/{id}/join", (string id) =>
             mgr.Get(id) is { } rt ? Results.Ok(JoinInfo.Resolve(rt.Config)) : Results.NotFound());
+
+        // ---------- router ports (through PortHop when available) ----------
+
+        api.MapGet("/servers/{id}/ports", async (string id, bool? refresh) =>
+            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.StatusAsync(rt.Config, refresh == true)) : Results.NotFound());
+
+        api.MapPost("/servers/{id}/ports/open", async (string id) =>
+            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.OpenAsync(rt.Config)) : Results.NotFound());
+
+        api.MapPost("/servers/{id}/ports/close", async (string id) =>
+            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.CloseAsync(rt.Config)) : Results.NotFound());
+
+        api.MapGet("/porthop", async () => Results.Ok(await PortHopClient.InfoAsync()));
+
+        api.MapPost("/porthop/show", async () =>
+            await PortHopClient.ShowAsync() ? Results.Ok() : Error("PortHop isn't installed on this PC."));
 
         api.MapPut("/settings", (SettingsRequest req) =>
         {

@@ -347,6 +347,7 @@ async function loadDetail() {
     renderHeader();
     renderQuickCommands();
     renderJoin();
+    renderPorts();
     if (state.tab === 'settings') renderSettings();
     if (state.tab === 'configs') loadConfigs();
   } catch (e) { toast(e.message, 'bad'); }
@@ -361,6 +362,75 @@ function renderAll() {
   if (!s) return;
   renderHeader();
   setTab(state.tab, true);
+}
+
+// ---------------- router ports (PortHop or built in) ----------------
+
+const portsState = { status: null, busy: false, forId: null };
+const PORT_LABELS = { open: 'Open', partial: 'Partly open', closed: 'Closed', unknown: 'Unknown', none: 'None set', working: 'Working…' };
+
+// "Router ports" in the header: state, an Open/Close button and a menu with details.
+async function renderPorts(refresh = false) {
+  const s = current();
+  const value = $('#portsValue');
+  if (!s) { value.textContent = '–'; return; }
+  if (portsState.forId !== s.id) { portsState.status = null; portsState.forId = s.id; value.replaceChildren(h('span', { class: 'dim join-hint' }, 'Checking…')); }
+  if (!portsState.busy) {
+    try {
+      const st = await api('GET', `/api/servers/${s.id}/ports${refresh ? '?refresh=true' : ''}`);
+      if (current()?.id !== s.id) return;
+      portsState.status = st;
+    } catch (e) { value.replaceChildren(h('span', { class: 'dim join-hint' }, e.message)); return; }
+  }
+  drawPorts();
+}
+
+function drawPorts() {
+  const st = portsState.status, s = current(), value = $('#portsValue');
+  if (!s || !st) return;
+  const state = portsState.busy ? 'working' : st.state;
+  value.replaceChildren();
+  const pill = h('span', { class: `ports-pill ports-${state}`, title: st.message || `${st.spec || 'No ports'} via ${st.backendLabel}` },
+    h('span', { class: 'ports-dot' }), PORT_LABELS[state] || state);
+  value.append(pill);
+  if (st.state === 'none') {
+    value.append(h('button', { class: 'link join-hint', type: 'button', onclick: () => setTab('settings') }, 'Set ports'));
+    return;
+  }
+  const wantOpen = !(st.state === 'open');
+  const act = h('button', { class: 'btn btn-small', type: 'button', disabled: portsState.busy || null,
+    title: wantOpen ? `Open ${st.spec} on your router` : `Close ${st.spec} on your router` }, wantOpen ? 'Open' : 'Close');
+  act.onclick = () => changePorts(wantOpen);
+  const more = h('button', { class: 'btn btn-tiny', type: 'button', title: 'Port details', 'aria-haspopup': 'menu', html: icons.caret });
+  more.onclick = () => {
+    const items = [{ heading: `${st.spec} (${st.source})` }];
+    for (const p of st.ports) items.push({ label: `${p.open ? '✓' : '○'}  ${p.protocol} ${p.port}`, sub: p.error || (p.open ? 'Forwarded to this PC' : 'Not forwarded'), disabled: true });
+    if (st.message) items.push({ label: 'Note', sub: st.message, disabled: true });
+    items.push('sep', { heading: `Handled by ${st.backendLabel}` },
+      { label: 'Check again', sub: 'Ask the router for the current state', onClick: () => renderPorts(true) });
+    if (st.backend === 'porthop') items.push({ label: 'Open PortHop', sub: 'See every forward and its settings', onClick: openPortHop });
+    items.push({ label: 'Change ports', sub: 'Settings → Router ports', onClick: () => setTab('settings') });
+    openMenu(more, items);
+  };
+  value.append(act, more);
+}
+
+async function changePorts(open) {
+  const s = current();
+  if (!s || portsState.busy) return;
+  portsState.busy = true; drawPorts();
+  try {
+    const st = await api('POST', `/api/servers/${s.id}/ports/${open ? 'open' : 'close'}`);
+    if (current()?.id === s.id) portsState.status = st;
+    if (st.message) toast(st.message, 'bad');
+    else toast(open ? `Opened ${st.spec} via ${st.backendLabel}.` : `Closed ${st.spec}.`, 'good');
+  } catch (e) { toast(e.message, 'bad'); }
+  portsState.busy = false; drawPorts();
+}
+
+async function openPortHop() {
+  try { await api('POST', '/api/porthop/show'); toast('Opening PortHop…'); }
+  catch (e) { toast(e.message, 'bad'); }
 }
 
 // Where a join port came from, in words: "the game's default", "from server.properties"…
@@ -1132,6 +1202,28 @@ function renderSettings() {
         'Pictures come from the game\'s Steam page. Leave the box empty to use the game\'s own.'),
     )));
 
+  // Router ports: which ports to open and whether to follow the server's start/stop.
+  const ps = portsState.forId === c.id ? portsState.status : null;
+  const autoPorts = h('input', { type: 'checkbox', ...(c.forwardWhileRunning ? { checked: true } : {}) });
+  autoPorts.addEventListener('change', () => c.forwardWhileRunning = autoPorts.checked);
+  form.append(h('section', { class: 'set-group' },
+    h('h2', {}, 'Router ports'),
+    h('p', {}, 'The ports friends outside your home need. Hostbay opens them on your router with PortHop when it\'s installed, or with its own UPnP otherwise.'),
+    h('div', { class: 'set-rows' },
+      row('Ports to open', text('forwardPorts', {
+        mono: true,
+        get: () => c.forwardPorts ?? '',
+        set: v => { c.forwardPorts = v.trim() === '' ? null : v; },
+        placeholder: ps?.spec ? `Automatic: ${ps.spec}` : 'For example UDP 2456-2458, TCP 8888',
+      }), ps?.spec
+        ? `Leave it empty to use ${ps.spec} (${ps.source}). Write entries like "UDP 2456-2458, TCP 8888".`
+        : 'Write entries like "UDP 2456-2458, TCP 8888". TCP/UDP opens both.'),
+      row('Open while running', h('div', { class: 'inline' }, h('span', { class: 'toggle' }, autoPorts, h('span')),
+        h('span', { class: 'dim' }, 'Open these ports when the server starts and close them when it stops'))),
+      ps ? row('Handled by', h('div', { class: 'inline' }, h('span', {}, ps.backendLabel),
+        ps.backend === 'porthop' ? h('button', { class: 'btn btn-small', type: 'button', onclick: openPortHop }, 'Open PortHop') : null)) : null,
+    )));
+
   const exeInput = text('executable', { mono: true });
   form.append(h('section', { class: 'set-group' },
     h('h2', {}, 'Launch'),
@@ -1220,7 +1312,7 @@ function renderSettings() {
       const r = await api('PUT', `/api/servers/${c.id}`, c);
       state.detail = r;
       toast('Settings saved.', 'good');
-      renderSettings(); renderQuickCommands(); renderJoin();
+      renderSettings(); renderQuickCommands(); renderJoin(); renderPorts(true);
       state.configs = null;
     } catch (err) { toast(err.message, 'bad'); }
   };
@@ -1474,6 +1566,22 @@ async function appSettingsDialog() {
               status))));
     };
 
+    // Game server port forwarding: who does it (PortHop or Hostbay itself).
+    const portForwardGroup = () => {
+      const line = h('div', { class: 'inline' }, h('span', { class: 'dim' }, 'Checking for PortHop…'));
+      api('GET', '/api/porthop').then(ph => {
+        line.replaceChildren(
+          h('span', {}, ph.running ? `PortHop ${ph.version || ''} is running. Hostbay opens servers' ports through it.`
+            : ph.installed ? 'PortHop is installed. Hostbay starts it in the background when a server\'s ports need opening.'
+            : 'PortHop isn\'t installed, so Hostbay opens ports itself with UPnP.'),
+          ph.installed ? h('button', { class: 'btn btn-small', type: 'button', onclick: openPortHop }, 'Open PortHop') : null);
+      }).catch(e => line.replaceChildren(h('span', { class: 'dim' }, e.message)));
+      return h('div', { class: 'set-group' },
+        h('h2', {}, 'Port forwarding for game servers'),
+        h('p', {}, 'Each server\'s Router ports control (next to its join address) opens the ports friends need. PortHop also works on its own, so you can see and manage every forward there too.'),
+        h('div', { class: 'set-rows' }, h('div', { class: 'set-row' }, h('label', {}, 'Handled by'), line)));
+    };
+
     // This PC's addresses, each with a Copy button. Filled in once the public IP lookup returns.
     const copyLine = (value, what) => h('div', { class: 'addr-line' }, h('code', {}, value),
       h('button', { class: 'btn btn-small', type: 'button', onclick: () => copyText(value, `Copied ${what || value}`) }, h('span', { html: icons.copy }), 'Copy'));
@@ -1516,6 +1624,7 @@ async function appSettingsDialog() {
             h('div', { class: 'help' }, st.port !== st.configuredPort ? `Port ${st.configuredPort} was busy, so Hostbay is using ${st.port}.` : 'When you first turn on remote access, Windows asks whether to allow Hostbay through the firewall. Allow it on private networks.'))),
         )),
       internetGroup(),
+      portForwardGroup(),
       h('div', { class: 'set-group' },
         h('h2', {}, 'Window'),
         h('div', { class: 'set-rows' },
@@ -1563,6 +1672,8 @@ function connectEvents() {
     if (prev && now && prev.state !== now.state) {
       if (state.tab === 'configs' && state.editor) renderEditor();
       if (prev.commandChannel !== now.commandChannel) loadDetail();
+      // Automatic port forwarding runs on start/stop; pick up its result shortly after.
+      if (state.detail?.config.forwardWhileRunning) setTimeout(() => renderPorts(), 3500);
     }
   });
   es.onerror = () => { /* EventSource reconnects by itself */ };

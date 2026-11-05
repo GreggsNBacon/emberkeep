@@ -6,7 +6,9 @@
     <PublishDir>$(MSBuildThisFileDirectory)..\publish\</PublishDir>
     <!-- A new ProductCode per build makes every installer an upgrade of the last (see Package.wxs). -->
     <ProductCode Condition="'$(ProductCode)' == ''">$([System.Guid]::NewGuid().ToString("B").ToUpperInvariant())</ProductCode>
-    <DefineConstants>PublishDir=$(PublishDir);ProductCode=$(ProductCode)</DefineConstants>
+    <!-- The PortHop exe to bundle; build.ps1 builds it, or points at an existing one. -->
+    <PortHopExe Condition="'$(PortHopExe)' == ''">$(PublishDir)porthop\PortHop.exe</PortHopExe>
+    <DefineConstants>PublishDir=$(PublishDir);ProductCode=$(ProductCode);PortHopExe=$(PortHopExe)</DefineConstants>
     <!-- ICE91: per-user files by design; this package never installs per-machine.
          ICE61: same-version upgrades are deliberate so rebuilt installers replace each other. -->
     <SuppressIces>ICE91;ICE61</SuppressIces>

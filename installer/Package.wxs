@@ -30,6 +30,8 @@
     <StandardDirectory Id="LocalAppDataFolder">
       <Directory Id="UserProgramsFolder" Name="Programs">
         <Directory Id="INSTALLFOLDER" Name="Hostbay" />
+        <!-- PortHop ships with Hostbay but lives in its own folder and works on its own too. -->
+        <Directory Id="PORTHOPFOLDER" Name="PortHop" />
       </Directory>
     </StandardDirectory>
     <StandardDirectory Id="ProgramMenuFolder" />
@@ -57,10 +59,24 @@
     </Component>
     <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
 
+    <!-- PortHop: Hostbay forwards servers' ports through it, and it has its own window, tray and shortcut. -->
+    <Component Id="PortHopExeComponent" Directory="PORTHOPFOLDER" Guid="0DFD0980-6831-483E-8B1C-1BD804492D97">
+      <File Id="PortHopExe" Source="$(PortHopExe)" Name="PortHop.exe" />
+      <RegistryValue Root="HKCU" Key="Software\Hostbay" Name="PortHopFolder" Type="string" Value="[PORTHOPFOLDER]" KeyPath="yes" />
+      <RemoveFolder Id="RemovePortHopFolder" On="uninstall" />
+    </Component>
+    <Component Id="PortHopShortcut" Directory="ProgramMenuFolder" Guid="932A9CD4-BEDE-4233-B424-B5367355ECCF">
+      <Shortcut Id="StartMenuPortHop" Name="PortHop" Description="Open ports on your router for game servers"
+                Target="[PORTHOPFOLDER]PortHop.exe" WorkingDirectory="PORTHOPFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\Hostbay" Name="PortHopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
     <Feature Id="Main" Title="Hostbay">
       <ComponentRef Id="HostbayExeComponent" />
       <ComponentRef Id="StartMenuShortcut" />
       <ComponentRef Id="DesktopShortcut" />
+      <ComponentRef Id="PortHopExeComponent" />
+      <ComponentRef Id="PortHopShortcut" />
     </Feature>
 
     <!-- Installer look and the "Launch Hostbay" checkbox on the last page. -->
