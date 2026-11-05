@@ -90,10 +90,69 @@ const game = id => state.games[id] || state.games.generic || { name: id, badge: 
 const current = () => state.servers.find(s => s.id === state.selectedId);
 const isCrashed = s => s.state === 'Stopped' && (s.lastError || (s.lastExitCode != null && s.lastExitCode !== 0));
 
-function badge(gameId, s, big) {
+// The game's wide library art behind the server header. Shown only once it has loaded.
+function setHero(appId) {
+  const head = $('#serverHead');
+  const key = String(appId || '');
+  if (head.dataset.hero === key) return;
+  head.dataset.hero = key;
+  head.classList.remove('has-hero');
+  head.style.removeProperty('--hero');
+  if (!appId) return;
+  const img = new Image();
+  img.onload = () => {
+    if (head.dataset.hero !== key) return; // switched servers meanwhile
+    head.style.setProperty('--hero', `url("${img.src}")`);
+    head.classList.add('has-hero');
+  };
+  img.src = artUrl(appId, 'hero');
+}
+
+// URL of cached Steam artwork. kind: header | hero | cover | logo
+const artUrl = (appId, kind) => `/api/art/${appId}/${kind}`;
+
+// Game badge: the game's cover art when Steam has it, otherwise its two letters. A dot shows server status.
+function badge(gameId, s, big, artAppId) {
   const g = game(gameId);
-  const el = h('div', { class: `badge${big ? ' big' : ''}`, 'data-state': s?.state || 'Stopped', 'data-crashed': s && isCrashed(s) ? 'true' : 'false' }, g.badge);
+  const el = h('div', { class: `badge${big ? ' big' : ''}` }, g.badge);
   el.style.setProperty('--game', g.color);
+  if (artAppId) {
+    const img = h('img', { class: 'badge-art', src: artUrl(artAppId, 'cover'), alt: '', loading: 'lazy', draggable: 'false' });
+    img.onerror = () => { img.remove(); el.classList.remove('has-art'); };
+    el.classList.add('has-art');
+    el.append(img);
+  }
+  setBadgeState(el, s);
+  return el;
+}
+function setBadgeState(el, s) {
+  el.dataset.state = s?.state || 'Stopped';
+  el.dataset.crashed = s && isCrashed(s) ? 'true' : 'false';
+}
+
+// The Steam store header (wide) for scan results, falling back to the letter badge.
+function candArt(gameId, artAppId) {
+  // Custom servers have no letters worth showing, so they get a plain placeholder instead.
+  const fallback = () => gameId === 'generic' ? h('span', { class: 'no-art' }, 'No picture') : badge(gameId);
+  if (!artAppId) return h('div', { class: 'cand-art' }, fallback());
+  const wrap = h('div', { class: 'cand-art' });
+  const img = h('img', { src: artUrl(artAppId, 'header'), alt: '', loading: 'lazy' });
+  img.onerror = () => wrap.replaceChildren(fallback());
+  wrap.append(img);
+  return wrap;
+}
+
+// Badges are reused between redraws (every couple of seconds) so their images don't flicker.
+const badgeCache = new Map();
+function cachedBadge(key, gameId, s, big, artAppId) {
+  const sig = `${gameId}|${artAppId || ''}|${big ? 1 : 0}`;
+  let el = badgeCache.get(key);
+  if (!el || el.dataset.sig !== sig) {
+    el = badge(gameId, s, big, artAppId);
+    el.dataset.sig = sig;
+    badgeCache.set(key, el);
+  }
+  setBadgeState(el, s);
   return el;
 }
 
@@ -255,7 +314,7 @@ function renderSidebar() {
       'aria-current': s.id === state.selectedId ? 'true' : null,
       onclick: () => { select(s.id); $('#app').classList.remove('menu'); },
     },
-      badge(s.gameId, s),
+      cachedBadge(`side-${s.id}`, s.gameId, s, false, s.artAppId),
       h('span', { class: 'meta' }, h('span', { class: 'name' }, s.name), h('span', { class: 'sub' }, sub)),
       s.state === 'Running' ? h('span', { class: 'cpu' }, `${Math.round(s.cpu)}%`) : h('span'));
     item.style.setProperty('--game', g.color);
@@ -330,13 +389,17 @@ async function renderJoin() {
     value.append(h('button', { class: 'link join-hint', type: 'button', onclick: () => setTab('settings') }, 'Set the join port in Settings'));
     return;
   }
-  try { await loadNetwork(false); } catch { }
+  // Default to the public IP (what friends elsewhere need); fall back to the local one if it can't be looked up.
+  try { await loadNetwork(true); } catch { }
   if (state.detail !== d) return; // switched servers while loading
-  const ip = primaryLocal()?.address || '127.0.0.1';
+  const isPublic = !!network.publicIp;
+  const ip = network.publicIp || primaryLocal()?.address || '127.0.0.1';
   const addr = `${ip}:${j.port}`;
-  const copyBtn = h('button', { class: 'btn btn-tiny', type: 'button', title: 'Copy the address for friends on your network', html: icons.copy,
-    onclick: () => copyText(addr, `Copied ${addr}`) });
-  const more = h('button', { class: 'btn btn-tiny', type: 'button', title: 'Other addresses: VPN or internet', 'aria-haspopup': 'menu', html: icons.caret });
+  label.textContent = isPublic ? 'Join address (internet)' : 'Join address (home network)';
+  const copyBtn = h('button', { class: 'btn btn-tiny', type: 'button', html: icons.copy,
+    title: isPublic ? 'Copy the address for friends over the internet' : 'Copy the address for friends on your network',
+    onclick: () => copyText(addr, isPublic ? `Copied ${addr}. Friends outside your home need the port forwarded on your router.` : `Copied ${addr}`) });
+  const more = h('button', { class: 'btn btn-tiny', type: 'button', title: 'Other addresses: home network or VPN', 'aria-haspopup': 'menu', html: icons.caret });
   more.onclick = async () => {
     const items = await addressMenuItems(a => `${a}:${j.port}`, a => copyText(`${a}:${j.port}`));
     items.push('sep', { label: `Port ${j.port}`, sub: `${portSource(j, true)}. Change it under Settings → Join port.`, disabled: true });
@@ -350,7 +413,9 @@ function renderHeader() {
   if (!s) return;
   const g = game(s.gameId);
   $('#serverView').style.setProperty('--game', g.color);
-  $('#headBadge').replaceWith(Object.assign(badge(s.gameId, s, true), { id: 'headBadge' }));
+  const hb = cachedBadge('head', s.gameId, s, true, s.artAppId);
+  if ($('#headBadge') !== hb) { hb.id = 'headBadge'; $('#headBadge').replaceWith(hb); }
+  setHero(s.artAppId);
   $('#headName').textContent = s.name;
   $('#headGame').textContent = g.name;
   $('#headPath').textContent = s.installDir;
@@ -1019,7 +1084,29 @@ function renderSettings() {
     } }, 'Browse'));
 
   const gameSel = h('select', { class: 'input' }, Object.values(state.games).map(x => h('option', { value: x.id, ...(x.id === c.gameId ? { selected: true } : {}) }, x.name)));
-  gameSel.addEventListener('change', () => { c.gameId = gameSel.value; });
+  // Artwork: the game's Steam art by default; any Steam app can be chosen instead.
+  const defaultArt = () => game(c.gameId).artAppId || (c.gameId === 'generic' ? c.steamAppId : null);
+  const artPreview = h('div', { class: 'art-preview' });
+  const drawArt = () => {
+    const id = c.artAppId || defaultArt();
+    artPreview.replaceChildren();
+    if (!id) { artPreview.append(h('span', { class: 'dim' }, 'No artwork. Find the game on Steam to add some.')); return; }
+    const img = h('img', { src: artUrl(id, 'header'), alt: '' });
+    img.onerror = () => artPreview.replaceChildren(h('span', { class: 'dim' }, `Steam has no artwork for app ${id}. Find the game on Steam instead.`));
+    artPreview.append(img);
+  };
+  const artInput = text('artAppId', {
+    type: 'number', mono: true,
+    get: () => c.artAppId ?? '',
+    set: v => { c.artAppId = v.trim() === '' ? null : Number(v); drawArt(); },
+    placeholder: defaultArt() ? `Default: ${defaultArt()}` : 'Steam app ID',
+  });
+  const findArt = h('button', { class: 'btn', type: 'button', onclick: async () => {
+    const id = await steamGamePicker(c.name.replace(/\b(dedicated\s+)?server\b/ig, '').trim() || game(c.gameId).name);
+    if (id) { c.artAppId = id; artInput.value = id; drawArt(); }
+  } }, 'Find game on Steam');
+  gameSel.addEventListener('change', () => { c.gameId = gameSel.value; drawArt(); });
+  drawArt();
 
   form.append(h('section', { class: 'set-group' },
     h('h2', {}, 'General'),
@@ -1035,6 +1122,8 @@ function renderSettings() {
       }), d.join?.port && d.join.source !== 'set in Settings'
         ? `The port friends connect on. Leave it empty to keep using ${d.join.port} (${portSource(d.join)}).`
         : 'The port friends connect on, used by Copy address. Leave it empty to detect it from the launch arguments or config.'),
+      row('Artwork', h('div', {}, artPreview, h('div', { class: 'with-btn' }, artInput, findArt)),
+        'Pictures come from the game\'s Steam page. Leave the box empty to use the game\'s own.'),
     )));
 
   const exeInput = text('executable', { mono: true });
@@ -1184,7 +1273,7 @@ async function scanPanel(panel, m) {
     for (const c of r.candidates) {
       const g = game(c.gameId);
       const el = h('div', { class: `cand${c.alreadyAdded ? ' added' : ''}` },
-        badge(c.gameId),
+        candArt(c.gameId, g.artAppId),
         h('div', { class: 'meta' }, h('div', { class: 'name' }, c.name), h('span', { class: 'mono-path', title: c.installDir }, c.installDir)),
         c.alreadyAdded ? h('span', { class: 'dim' }, 'Added') : h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => addCandidate(c, m, g.id === 'generic' ? c.name : g.name) }, 'Add'));
       el.style.setProperty('--game', g.color);
@@ -1227,6 +1316,45 @@ function folderPanel(panel, m) {
     } }, 'Browse')),
     result);
   path.style.flex = '1';
+}
+
+// ---------------- Steam game picker (artwork) ----------------
+
+// Searches the Steam store by name and resolves to the chosen app ID, or null.
+function steamGamePicker(initial) {
+  return new Promise(resolve => {
+    let done = false;
+    const finish = v => { if (done) return; done = true; resolve(v); m.close(); };
+    const q = h('input', { class: 'input', type: 'search', placeholder: 'Game name', 'aria-label': 'Game name', autofocus: true });
+    q.value = initial || '';
+    const results = h('div', { class: 'cand-list art-results' });
+    const status = h('div', { class: 'scan-status' });
+    let seq = 0;
+    const search = async () => {
+      const term = q.value.trim();
+      if (!term) { results.replaceChildren(); status.textContent = ''; return; }
+      const mine = ++seq;
+      status.textContent = 'Searching Steam…';
+      try {
+        const list = await api('GET', `/api/art/search?q=${encodeURIComponent(term)}`);
+        if (mine !== seq) return;
+        status.textContent = list.length ? 'Pick the game whose pictures to use.' : 'No games found on Steam. Try another name.';
+        results.replaceChildren(...list.map(r => h('button', { class: 'cand art-pick', type: 'button', onclick: () => finish(r.id) },
+          candArt('generic', r.id),
+          h('div', { class: 'meta' }, h('div', { class: 'name' }, r.name), h('span', { class: 'mono-path' }, `App ${r.id}`)))));
+      } catch (e) { if (mine === seq) status.textContent = e.message; }
+    };
+    let t;
+    q.addEventListener('input', () => { clearTimeout(t); t = setTimeout(search, 350); });
+    q.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); clearTimeout(t); search(); } });
+    const m = openModal({
+      title: 'Find the game on Steam',
+      body: h('div', {}, q, status, results),
+      onClose: () => { if (!done) { done = true; resolve(null); } },
+    });
+    q.style.width = '100%';
+    search();
+  });
 }
 
 // ---------------- folder browser ----------------

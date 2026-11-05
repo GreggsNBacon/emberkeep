@@ -10,7 +10,8 @@ A Windows app for running game servers for you and your friends. Run `Hostbay.ex
 - **Sends commands.** Commands go through console input (Minecraft, Terraria, Zomboid, Rust), RCON (Palworld, ARK, V Rising, Conan) or Telnet (7 Days to Die). RCON passwords and ports are read from the game's own config.
 - **Shows live logs.** The server's console output and its log files stream in real time, with filtering and timestamps.
 - **Offers remote access.** Set a password, turn on remote access, then open `http://<host-ip>:8765` from another PC or your phone.
-- **Shows join addresses.** Each server shows the address friends join with (this PC's IP plus the right port, read from the launch arguments or game config), with Copy buttons for local network, VPN and public addresses. IP settings in config files get a "Fill current IP" button. App settings lists all of this PC's addresses with Copy buttons.
+- **Game artwork.** Each game's Steam art appears as its sidebar badge and as a banner behind the server header. Pictures are downloaded once from Steam and cached in `%APPDATA%Hostbayrt`. Custom servers can pick any Steam game's art in Settings → Artwork.
+- **Shows join addresses.** Each server shows the address friends join with (your public IP by default, plus the right port, read from the launch arguments or game config), with Copy buttons for local network, VPN and public addresses. IP settings in config files get a "Fill current IP" button. App settings lists all of this PC's addresses with Copy buttons.
 - **Picks up running servers.** If a server was already running when Hostbay started, Hostbay detects it and can stop it and show its log files.
 
 ## Supported games

@@ -16,6 +16,8 @@ public sealed class GameDefinition
     public required string Badge { get; init; }
     public required string Color { get; init; }
     public int[] SteamAppIds { get; init; } = [];
+    /// <summary>The game's own Steam app ID, used for artwork (server tools have no store art).</summary>
+    public int? ArtAppId { get; init; }
     /// <summary>Candidate executables relative to the install dir; the first that exists is used.</summary>
     public string[] Executables { get; init; } = [];
     public string DefaultArguments { get; init; } = "";
@@ -46,6 +48,7 @@ public static class GameCatalog
         new()
         {
             Id = "palworld", Name = "Palworld", Badge = "PW", Color = "#3fb6ff",
+            ArtAppId = 1623730,
             SteamAppIds = [2394010],
             Executables = ["PalServer.exe"],
             DefaultArguments = "-port=8211 -players=32 -useperfthreads -NoAsyncLoadingThread -UseMultithreadForDS",
@@ -78,6 +81,7 @@ public static class GameCatalog
         new()
         {
             Id = "enshrouded", Name = "Enshrouded", Badge = "EN", Color = "#c792ea",
+            ArtAppId = 1203620,
             SteamAppIds = [2278520],
             Executables = ["enshrouded_server.exe"],
             DetectFiles = ["enshrouded_server.exe"],
@@ -89,6 +93,7 @@ public static class GameCatalog
         new()
         {
             Id = "valheim", Name = "Valheim", Badge = "VH", Color = "#f2b84b",
+            ArtAppId = 892970,
             SteamAppIds = [896660],
             Executables = ["valheim_server.exe"],
             DefaultArguments = "-nographics -batchmode -name \"My Valheim Server\" -port 2456 -world \"Dedicated\" -password \"changeme\" -crossplay",
@@ -107,6 +112,7 @@ public static class GameCatalog
         new()
         {
             Id = "satisfactory", Name = "Satisfactory", Badge = "SF", Color = "#f58b3c",
+            ArtAppId = 526870,
             SteamAppIds = [1690800],
             Executables = ["FactoryServer.exe"],
             DefaultArguments = "-log -unattended",
@@ -150,6 +156,7 @@ public static class GameCatalog
         new()
         {
             Id = "vrising", Name = "V Rising", Badge = "VR", Color = "#e0424b",
+            ArtAppId = 1604030,
             SteamAppIds = [1829350],
             Executables = ["VRisingServer.exe"],
             DefaultArguments = "-persistentDataPath .\\save-data -serverName \"My V Rising Server\" -saveName world1 -logFile .\\logs\\VRisingServer.log",
@@ -178,6 +185,7 @@ public static class GameCatalog
         new()
         {
             Id = "7dtd", Name = "7 Days to Die", Badge = "7D", Color = "#b5523b",
+            ArtAppId = 251570,
             SteamAppIds = [294420],
             Executables = ["7DaysToDieServer.exe"],
             DefaultArguments = "-quit -batchmode -nographics -configfile=serverconfig.xml -dedicated -logfile output_log__hostbay.txt",
@@ -202,6 +210,7 @@ public static class GameCatalog
         new()
         {
             Id = "zomboid", Name = "Project Zomboid", Badge = "PZ", Color = "#9bbf3a",
+            ArtAppId = 108600,
             SteamAppIds = [380870],
             Executables = ["StartServer64_nosteam.bat", "StartServer64.bat"],
             DetectFiles = ["StartServer64.bat"],
@@ -220,6 +229,7 @@ public static class GameCatalog
         new()
         {
             Id = "terraria", Name = "Terraria", Badge = "TR", Color = "#5ea84a",
+            ArtAppId = 105600,
             SteamAppIds = [105600],
             Executables = ["TerrariaServer.exe"],
             DefaultArguments = "-config serverconfig.txt",
@@ -232,6 +242,7 @@ public static class GameCatalog
         new()
         {
             Id = "ark-se", Name = "ARK: Survival Evolved", Badge = "AE", Color = "#4fb0a8",
+            ArtAppId = 346110,
             SteamAppIds = [376030],
             Executables = ["ShooterGame\\Binaries\\Win64\\ShooterGameServer.exe"],
             DefaultArguments = "TheIsland?listen?SessionName=MyArkServer?RCONEnabled=True?RCONPort=27020 -server -log",
@@ -245,6 +256,7 @@ public static class GameCatalog
         new()
         {
             Id = "ark-sa", Name = "ARK: Survival Ascended", Badge = "AA", Color = "#38a3c9",
+            ArtAppId = 2399830,
             SteamAppIds = [2430930],
             Executables = ["ShooterGame\\Binaries\\Win64\\ArkAscendedServer.exe"],
             DefaultArguments = "TheIsland_WP?listen?SessionName=MyArkServer?RCONEnabled=True?RCONPort=27020 -log",
@@ -258,6 +270,7 @@ public static class GameCatalog
         new()
         {
             Id = "sotf", Name = "Sons of the Forest", Badge = "SO", Color = "#7fa36b",
+            ArtAppId = 1326470,
             SteamAppIds = [2465200],
             Executables = ["SonsOfTheForestDS.exe"],
             DetectFiles = ["SonsOfTheForestDS.exe"],
@@ -267,6 +280,7 @@ public static class GameCatalog
         new()
         {
             Id = "conan", Name = "Conan Exiles", Badge = "CE", Color = "#d39b4a",
+            ArtAppId = 440900,
             SteamAppIds = [443030],
             Executables = ["ConanSandboxServer.exe"],
             DefaultArguments = "-log",
@@ -285,6 +299,7 @@ public static class GameCatalog
         new()
         {
             Id = "corekeeper", Name = "Core Keeper", Badge = "CK", Color = "#e7c45a",
+            ArtAppId = 1621690,
             SteamAppIds = [1963720],
             Executables = ["CoreKeeperServer.exe"],
             DefaultArguments = "-batchmode -logfile CoreKeeperServerLog.txt",
@@ -297,6 +312,7 @@ public static class GameCatalog
         new()
         {
             Id = "rust", Name = "Rust", Badge = "RS", Color = "#cd412b",
+            ArtAppId = 252490,
             SteamAppIds = [258550],
             Executables = ["RustDedicated.exe"],
             DefaultArguments = "-batchmode +server.port 28015 +server.identity \"main\" +server.hostname \"My Rust Server\" +server.maxplayers 50 +server.worldsize 3000",

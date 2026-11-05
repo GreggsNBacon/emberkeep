@@ -45,6 +45,8 @@ public sealed class ServerInstance
     public int? SteamAppId { get; set; }
     /// <summary>Port players connect to. Null means detect it from the launch arguments or game config.</summary>
     public int? JoinPort { get; set; }
+    /// <summary>Steam app ID whose artwork to show. Null means use the game's own.</summary>
+    public int? ArtAppId { get; set; }
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;
 }
 

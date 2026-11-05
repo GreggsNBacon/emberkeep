@@ -271,6 +271,21 @@ public static class Api
             publicIp = includePublic == true ? await NetworkInfo.PublicIpAsync() : null,
         });
 
+        // Game artwork, cached from Steam's CDN. Long browser caching: the image for an app ID never changes.
+        api.MapGet("/art/{appId:int}/{kind}", async (int appId, string kind, HttpContext ctx) =>
+        {
+            var path = await ArtCache.GetAsync(appId, kind);
+            if (path == null) return Results.NotFound();
+            ctx.Response.Headers.CacheControl = "private, max-age=604800";
+            return Results.File(path, path.EndsWith(".png") ? "image/png" : "image/jpeg");
+        });
+
+        api.MapGet("/art/search", async (string q) =>
+        {
+            try { return Results.Ok(await ArtCache.SearchAsync(q)); }
+            catch { return Error("Couldn't reach the Steam store. Check your internet connection."); }
+        });
+
         api.MapGet("/servers/{id}/join", (string id) =>
             mgr.Get(id) is { } rt ? Results.Ok(JoinInfo.Resolve(rt.Config)) : Results.NotFound());
 
@@ -334,7 +349,7 @@ public static class Api
 
     private static object GameDto(GameDefinition g) => new
     {
-        g.Id, g.Name, g.Badge, g.Color, g.SteamAppIds, g.DefaultArguments, g.Notes, g.QuickCommands,
+        g.Id, g.Name, g.Badge, g.Color, g.SteamAppIds, g.ArtAppId, g.DefaultArguments, g.Notes, g.QuickCommands,
         commands = g.Commands, stop = g.Stop, g.StopCommands, g.LogFiles, g.ConfigFiles, g.DefaultRconPort,
     };
 
@@ -354,6 +369,7 @@ public static class Api
         adopted = rt.Adopted,
         commandChannel = rt.Config.CommandChannel,
         installDir = rt.Config.InstallDir,
+        artAppId = ArtCache.AppIdFor(rt.Config),
     };
 
     private static object Detail(ServerRuntime rt)

@@ -347,7 +347,7 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .cand-list { display: flex; flex-direction: column; gap: 6px; }
 .cand {
   --game: var(--brand);
-  display: grid; grid-template-columns: 38px 1fr auto; gap: 12px; align-items: center;
+  display: grid; grid-template-columns: auto 1fr auto; gap: 12px; align-items: center;
   padding: 10px 12px; border-radius: var(--r-md); background: var(--deck); border: 1px solid transparent;
 }
 .cand .meta { min-width: 0; }
@@ -459,3 +459,31 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
   .stat-join dd { justify-content: flex-start; }
   .with-fill { flex-wrap: wrap; }
 }
+
+/* ---------- Steam artwork ---------- */
+/* Cover art fills the badge; the status dot stays on top. */
+.badge.has-art { color: transparent; box-shadow: 0 0 0 1px color-mix(in srgb, var(--game) 45%, transparent); overflow: visible; }
+.badge-art { position: absolute; inset: 0; width: 100%; height: 100%; object-fit: cover; object-position: center 20%; border-radius: inherit; }
+.badge::after { z-index: 1; }
+
+/* The game's library hero art behind the server header, darkened so text stays readable. */
+.server-head { position: relative; isolation: isolate; }
+.server-head.has-hero::before {
+  content: ""; position: absolute; inset: 0; z-index: -1; pointer-events: none;
+  background:
+    linear-gradient(90deg, var(--harbor) 0%, rgba(16, 21, 31, .9) 34%, rgba(16, 21, 31, .62) 64%, rgba(16, 21, 31, .86) 100%),
+    linear-gradient(0deg, var(--harbor) 2%, rgba(16, 21, 31, 0) 60%),
+    var(--hero) center 28% / cover no-repeat;
+  animation: fade .5s ease-out;
+}
+.server-head.has-hero .head-title h1 { text-shadow: 0 2px 18px rgba(0, 0, 0, .55); }
+
+/* Store header art in scan results and the Steam picker. */
+.cand-art { width: 92px; height: 43px; border-radius: 6px; overflow: hidden; display: grid; place-items: center; flex: none; }
+.cand-art img { width: 100%; height: 100%; object-fit: cover; display: block; }
+.art-results { margin-top: 4px; max-height: 420px; overflow-y: auto; }
+.art-pick { width: 100%; text-align: left; cursor: pointer; border: 1px solid transparent; }
+.art-pick:hover, .art-pick:focus-visible { border-color: color-mix(in srgb, var(--brand) 60%, var(--rope)); outline: none; }
+.art-preview { margin-bottom: 8px; min-height: 20px; }
+.art-preview img { display: block; width: 230px; max-width: 100%; border-radius: 8px; box-shadow: 0 6px 20px rgba(0, 0, 0, .35); }
+.no-art { width: 100%; height: 100%; display: grid; place-items: center; border: 1px dashed var(--rope-hi); border-radius: 6px; font-size: 11px; color: var(--fog-faint); }
