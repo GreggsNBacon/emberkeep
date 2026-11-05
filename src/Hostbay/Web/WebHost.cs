@@ -168,8 +168,8 @@ public sealed class WebHost
         }
         if (path == "/auth/logout")
         {
-            Auth.EndSession(ctx.Request.Cookies[AuthService.CookieName]);
-            ctx.Response.Cookies.Delete(AuthService.CookieName);
+            Auth.EndSession(AuthService.SessionCookie(ctx));
+            ctx.Response.Cookies.Delete(AuthService.CookieName(ctx));
             ctx.Response.Redirect("/login");
             return;
         }
@@ -182,7 +182,7 @@ public sealed class WebHost
 
         // Everything else (the app page, its script, all data) needs a signed-in account. The account and its
         // rights are looked up again on every request, and endpoints check them before doing anything.
-        var principal = Auth.Resolve(ctx.Request.Cookies[AuthService.CookieName]);
+        var principal = Auth.Resolve(AuthService.SessionCookie(ctx));
         if (principal == null)
         {
             if (path.StartsWith("/api/")) { ctx.Response.StatusCode = 401; return; }
@@ -199,7 +199,7 @@ public sealed class WebHost
     public static Principal Who(HttpContext ctx) => (Principal)ctx.Items[PrincipalKey]!;
 
     public static void SetSessionCookie(HttpContext ctx, string session) =>
-        ctx.Response.Cookies.Append(AuthService.CookieName, session, new CookieOptions
+        ctx.Response.Cookies.Append(AuthService.CookieName(ctx), session, new CookieOptions
         {
             HttpOnly = true,
             SameSite = SameSiteMode.Strict,

@@ -100,7 +100,14 @@ public sealed class MainForm : Form
             core.NewWindowRequested += (_, a) => { a.Handled = true; OpenUrl(a.Uri); };
             core.NavigationStarting += (_, a) =>
             {
-                if (!a.Uri.StartsWith(_host.LocalUrl, StringComparison.OrdinalIgnoreCase)) { a.Cancel = true; OpenUrl(a.Uri); }
+                if (!a.Uri.StartsWith(_host.LocalUrl, StringComparison.OrdinalIgnoreCase)) { a.Cancel = true; OpenUrl(a.Uri); return; }
+                // The window on the host PC never needs a password: if it ever lands on the sign-in page (its session
+                // ended, e.g. Hostbay restarted underneath it), it signs itself in again.
+                if (Uri.TryCreate(a.Uri, UriKind.Absolute, out var u) && u.AbsolutePath.Equals("/login", StringComparison.OrdinalIgnoreCase))
+                {
+                    a.Cancel = true;
+                    BeginInvoke(() => core.Navigate(_host.LocalLoginUrl));
+                }
             };
             core.Navigate(_host.LocalLoginUrl);
         }

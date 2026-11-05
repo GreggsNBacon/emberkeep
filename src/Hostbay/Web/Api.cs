@@ -178,7 +178,7 @@ public static class Api
 
         api.MapGet("/events", async (HttpContext ctx) =>
         {
-            var cookie = ctx.Request.Cookies[AuthService.CookieName];
+            var cookie = AuthService.SessionCookie(ctx);
             PrepareSse(ctx);
             using var signal = new SemaphoreSlim(0);
             void OnChange() { if (signal.CurrentCount == 0) signal.Release(); }
@@ -204,7 +204,7 @@ public static class Api
         {
             var rt = mgr.Get(id);
             if (rt == null) { ctx.Response.StatusCode = 404; return; }
-            var cookie = ctx.Request.Cookies[AuthService.CookieName];
+            var cookie = AuthService.SessionCookie(ctx);
             PrepareSse(ctx);
             var (backlog, ch) = rt.Logs.Subscribe();
             try

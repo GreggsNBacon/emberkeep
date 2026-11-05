@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Http;
 using System;
 using System.Collections.Concurrent;
 using System.Collections.Generic;
@@ -17,7 +18,10 @@ namespace Hostbay.Web;
 /// </summary>
 public sealed class AuthService
 {
-    public const string CookieName = "hb_session";
+    // Cookies are shared by every port on a host, so the name carries the port: two Hostbays on one PC (or a test copy)
+    // must never overwrite each other's sign-in.
+    public static string CookieName(HttpContext ctx) => $"hb_session_{ctx.Connection.LocalPort}";
+    public static string? SessionCookie(HttpContext ctx) => ctx.Request.Cookies[CookieName(ctx)];
     public const int MinPasswordLength = 8;
     /// <summary>Exposing Hostbay to the internet needs longer passwords than the home network does.</summary>
     public const int MinInternetPasswordLength = 10;
