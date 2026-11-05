@@ -62,7 +62,9 @@ The installer's source is in `installer/`. `Package.wxs` defines the package. Th
 
 ## PortHop
 
-PortHop (`..PortHop`) is a separate app for forwarding game ports. Hostbay finds a running copy through `%LOCALAPPDATA%PortHopinstance.json` and uses its local API (`/api/hello`, `/api/forwarded`, `/api/forward`, `/api/remove`). Forwards Hostbay makes are named `Hostbay: <server name>` in PortHop. `build.ps1` builds PortHop from source when Node is available and bundles it into the installer.
+PortHop (`..\PortHop`) is a separate app for forwarding game ports. Hostbay finds a running copy through `%LOCALAPPDATA%\PortHop\instance.json` and uses its local API (`/api/hello`, `/api/forwarded`, `/api/forward`, `/api/remove`). Forwards Hostbay makes are named `Hostbay: <server name>` in PortHop. `build.ps1` builds PortHop from source when Node is available (on PATH, or `$env:HOSTBAY_NODE`) and bundles it into the installer, which puts it in `%LOCALAPPDATA%\Programs\PortHop`.
+
+To go back to the version before PortHop: the git tag `v0.2-pre-porthop` (branch `hostbay-v1`), or the saved installer `releases\Hostbay-0.2.4.7-Setup.msi`.
 
 ## Not in this version
 
