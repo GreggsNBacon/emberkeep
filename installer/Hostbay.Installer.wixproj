@@ -1,0 +1,15 @@
+<Project Sdk="WixToolset.Sdk/6.0.2">
+  <!-- Builds Hostbay-Setup.msi from the single-file exe in ..\publish (run ..\build.ps1). -->
+  <PropertyGroup>
+    <OutputName>Hostbay-Setup</OutputName>
+    <Platform>x64</Platform>
+    <PublishDir>$(MSBuildThisFileDirectory)..\publish\</PublishDir>
+    <DefineConstants>PublishDir=$(PublishDir)</DefineConstants>
+    <!-- ICE91: per-user files by design; this package never installs per-machine. -->
+    <SuppressIces>ICE91</SuppressIces>
+  </PropertyGroup>
+  <ItemGroup>
+    <PackageReference Include="WixToolset.UI.wixext" Version="6.0.2" />
+    <PackageReference Include="WixToolset.Util.wixext" Version="6.0.2" />
+  </ItemGroup>
+</Project>

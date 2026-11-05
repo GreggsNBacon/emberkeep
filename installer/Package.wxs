@@ -1,0 +1,74 @@
+<Wix xmlns="http://wixtoolset.org/schemas/v4/wxs"
+     xmlns:ui="http://wixtoolset.org/schemas/v4/wxs/ui">
+
+  <!--
+    Per-user install: goes to %LOCALAPPDATA%\Programs\Hostbay, needs no admin rights.
+    The version comes from Hostbay.exe itself, so bumping <Version> in Hostbay.csproj is enough.
+  -->
+  <Package Name="Hostbay"
+           Manufacturer="Hostbay"
+           Version="!(bind.FileVersion.HostbayExe)"
+           UpgradeCode="F67D7696-CCF3-4208-908B-D6B67D7EAF50"
+           Scope="perUser"
+           Compressed="yes">
+
+    <MajorUpgrade DowngradeErrorMessage="A newer version of Hostbay is already installed." />
+    <MediaTemplate EmbedCab="yes" CompressionLevel="high" />
+
+    <Icon Id="HostbayIcon" SourceFile="..\src\Hostbay\Assets\hostbay.ico" />
+    <Property Id="ARPPRODUCTICON" Value="HostbayIcon" />
+    <Property Id="ARPNOREPAIR" Value="1" />
+
+    <!-- %LOCALAPPDATA%Programs is where Windows puts per-user apps. -->
+    <StandardDirectory Id="LocalAppDataFolder">
+      <Directory Id="UserProgramsFolder" Name="Programs">
+        <Directory Id="INSTALLFOLDER" Name="Hostbay" />
+      </Directory>
+    </StandardDirectory>
+    <StandardDirectory Id="ProgramMenuFolder" />
+    <StandardDirectory Id="DesktopFolder" />
+
+    <!-- Per-user components use an HKCU value as their key path, as Windows Installer expects. -->
+    <Component Id="HostbayExeComponent" Directory="INSTALLFOLDER" Guid="C751D144-B885-48E0-AA1D-7906FBB0A5B1">
+      <File Id="HostbayExe" Source="$(PublishDir)Hostbay.exe" />
+      <RegistryValue Root="HKCU" Key="Software\Hostbay" Name="InstallFolder" Type="string" Value="[INSTALLFOLDER]" KeyPath="yes" />
+      <RemoveFolder Id="RemoveInstallFolder" On="uninstall" />
+      <!-- Only removed if empty, so other apps in Programs are untouched. -->
+      <RemoveFolder Id="RemoveUserProgramsFolder" Directory="UserProgramsFolder" On="uninstall" />
+    </Component>
+
+    <Component Id="StartMenuShortcut" Directory="ProgramMenuFolder">
+      <Shortcut Id="StartMenuHostbay" Name="Hostbay" Description="Manage your game servers"
+                Target="[INSTALLFOLDER]Hostbay.exe" WorkingDirectory="INSTALLFOLDER" Icon="HostbayIcon" />
+      <RegistryValue Root="HKCU" Key="Software\Hostbay" Name="StartMenuShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+
+    <Component Id="DesktopShortcut" Directory="DesktopFolder" Condition="INSTALLDESKTOPSHORTCUT = 1">
+      <Shortcut Id="DesktopHostbay" Name="Hostbay" Description="Manage your game servers"
+                Target="[INSTALLFOLDER]Hostbay.exe" WorkingDirectory="INSTALLFOLDER" Icon="HostbayIcon" />
+      <RegistryValue Root="HKCU" Key="Software\Hostbay" Name="DesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
+    <Property Id="INSTALLDESKTOPSHORTCUT" Value="1" />
+
+    <Feature Id="Main" Title="Hostbay">
+      <ComponentRef Id="HostbayExeComponent" />
+      <ComponentRef Id="StartMenuShortcut" />
+      <ComponentRef Id="DesktopShortcut" />
+    </Feature>
+
+    <!-- Installer look and the "Launch Hostbay" checkbox on the last page. -->
+    <WixVariable Id="WixUILicenseRtf" Value="Assets\License.rtf" />
+    <WixVariable Id="WixUIBannerBmp" Value="Assets\Banner.bmp" />
+    <WixVariable Id="WixUIDialogBmp" Value="Assets\Dialog.bmp" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOXTEXT" Value="Launch Hostbay" />
+    <Property Id="WIXUI_EXITDIALOGOPTIONALCHECKBOX" Value="1" />
+    <Property Id="WixShellExecTarget" Value="[#HostbayExe]" />
+    <CustomAction Id="LaunchHostbay" DllEntry="WixShellExec" Impersonate="yes" BinaryRef="Wix4UtilCA_$(sys.BUILDARCHSHORT)" />
+
+    <UI>
+      <ui:WixUI Id="WixUI_Minimal" />
+      <Publish Dialog="ExitDialog" Control="Finish" Event="DoAction" Value="LaunchHostbay"
+               Condition="WIXUI_EXITDIALOGOPTIONALCHECKBOX = 1 and NOT Installed" />
+    </UI>
+  </Package>
+</Wix>
