@@ -1,0 +1,37 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Sign in | Hostbay</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<link rel="stylesheet" href="/app.css">
+</head>
+<body class="login-page">
+<form class="login" id="f">
+  <div class="brand"><img src="/favicon.svg" alt="" width="28" height="28"><span>Hostbay</span></div>
+  <h1>Sign in</h1>
+  <p>Enter the remote access password set in Hostbay on the host PC.</p>
+  <input class="input" id="pw" type="password" autocomplete="current-password" aria-label="Password" placeholder="Password" autofocus required>
+  <button class="btn btn-primary" type="submit">Sign in</button>
+  <div class="err" id="err" role="alert"></div>
+</form>
+<script>
+document.getElementById('f').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('err');
+  err.textContent = '';
+  try {
+    const r = await fetch('/auth/login', {
+      method: 'POST', credentials: 'same-origin',
+      headers: { 'Content-Type': 'application/json', 'X-Hostbay': '1' },
+      body: JSON.stringify({ password: document.getElementById('pw').value }),
+    });
+    if (r.ok) { location.href = '/'; return; }
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || 'Sign-in failed.';
+  } catch { err.textContent = 'Can\'t reach Hostbay. Is it running on the host PC?'; }
+});
+</script>
+</body>
+</html>
