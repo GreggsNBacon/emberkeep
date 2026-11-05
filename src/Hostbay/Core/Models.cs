@@ -68,6 +68,7 @@ public sealed class AppSettings
     public List<UserAccount> Users { get; set; } = new();
     public List<UserGroup> Groups { get; set; } = new();
     public List<ServerInstance> Servers { get; set; } = new();
+    public DiscordSettings Discord { get; set; } = new();
 }
 
 public sealed record LogLine(long Seq, DateTime Time, string Source, string Text);

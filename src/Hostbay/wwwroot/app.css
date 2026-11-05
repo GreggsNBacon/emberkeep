@@ -112,6 +112,7 @@ button, input, select, textarea { font: inherit; color: inherit; }
 .btn:hover:not(:disabled) { background: var(--deck-hi); border-color: var(--rope-hi); }
 .btn:disabled { opacity: .4; cursor: default; }
 .btn.wide { width: 100%; }
+a.btn { text-decoration: none; }
 .btn-small { height: 28px; padding: 0 10px; font-size: 13px; }
 .btn-ghost { background: transparent; border-color: transparent; color: var(--fog-dim); }
 .btn-ghost:hover:not(:disabled) { color: var(--fog); background: var(--deck); border-color: transparent; }
@@ -547,3 +548,13 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 @media (max-width: 860px) {
   .acct-add, .acct-row { grid-template-columns: 1fr; }
 }
+
+/* Discord bot */
+.dot-status { width: 9px; height: 9px; border-radius: 50%; background: var(--fog-faint); flex: none; }
+.dot-status.on { background: var(--run); box-shadow: 0 0 0 3px color-mix(in srgb, var(--run) 22%, transparent); }
+.dot-status.wait { background: var(--warn); animation: pulse 1.2s ease-in-out infinite; }
+.dot-status.bad { background: var(--bad); }
+@keyframes pulse { 50% { opacity: .35; } }
+.steps { margin: 0 0 12px; padding-left: 20px; color: var(--fog); font-size: 13.5px; line-height: 1.7; }
+.steps a { color: var(--brand-2); }
+.acct-add.discord-token { grid-template-columns: 1fr auto; max-width: 620px; }

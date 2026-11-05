@@ -1636,6 +1636,19 @@ async function appSettingsDialog() {
         h('div', { class: 'set-rows' }, h('div', { class: 'set-row' }, h('label', {}, 'Handled by'), line)));
     };
 
+    // Discord bot: a short status line here, everything else in its own dialog.
+    const discordGroup = () => {
+      const line = h('div', { class: 'inline' }, h('span', { class: 'dim' }, 'Checking…'));
+      api('GET', '/api/discord').then(d => {
+        line.replaceChildren(discordDot(d), h('span', {}, discordSummary(d)),
+          h('button', { class: 'btn btn-small', type: 'button', onclick: () => { m.close(); discordDialog(); } }, d.hasToken ? 'Discord settings' : 'Set up'));
+      }).catch(e => line.replaceChildren(h('span', { class: 'dim' }, e.message)));
+      return h('div', { class: 'set-group' },
+        h('h2', {}, 'Discord bot'),
+        h('p', {}, 'Add your own bot to your Discord server so friends can see which servers are up and get the address to join, without asking you.'),
+        h('div', { class: 'set-rows' }, h('div', { class: 'set-row' }, h('label', {}, 'Bot'), line)));
+    };
+
     // This PC's addresses, each with a Copy button. Filled in once the public IP lookup returns.
     const copyLine = (value, what) => h('div', { class: 'addr-line' }, h('code', {}, showIp(value)),
       h('button', { class: 'btn btn-small', type: 'button', onclick: () => copyText(value, `Copied ${what || value}`) }, h('span', { html: icons.copy }), 'Copy'));
@@ -1677,6 +1690,7 @@ async function appSettingsDialog() {
         )),
       internetGroup(),
       portForwardGroup(),
+      discordGroup(),
       h('div', { class: 'set-group' },
         h('h2', {}, 'Window'),
         h('div', { class: 'set-rows' },
@@ -1857,6 +1871,159 @@ async function usersDialog(tab = 'users') {
   }
 
   show(tab);
+}
+
+// ---------------- Discord bot (full access) ----------------
+
+const discordDot = d => h('span', { class: `dot-status ${d.status.state === 'online' ? 'on' : d.status.state === 'error' ? 'bad' : d.status.state === 'connecting' ? 'wait' : ''}` });
+const discordSummary = d => {
+  const s = d.status;
+  if (!d.hasToken) return 'Not set up.';
+  if (s.state === 'online') return `Online as ${s.botName || 'your bot'} in ${s.guilds} Discord server${s.guilds === 1 ? '' : 's'}${d.board.posted ? `, status board in #${d.board.channelName}` : ''}.`;
+  return s.message;
+};
+
+async function discordDialog() {
+  let d;
+  try { d = await api('GET', '/api/discord'); } catch (e) { toast(e.message, 'bad'); return; }
+  const body = h('div', { class: 'field-stack' });
+  let channels = null, pollTimer = null, closed = false;
+  const m = openModal({ title: 'Discord bot', body, onClose: () => { closed = true; clearTimeout(pollTimer); } });
+  m.modal.classList.add('wide');
+
+  const apply = async (method, url, payload, ok) => {
+    try { d = await api(method, url, payload); if (ok) toast(ok, 'good'); draw(); return true; }
+    catch (e) { toast(e.message, 'bad'); return false; }
+  };
+  // While connecting, keep the status fresh.
+  const poll = () => {
+    clearTimeout(pollTimer);
+    if (closed || d.status.state !== 'connecting') return;
+    pollTimer = setTimeout(async () => { try { d = await api('GET', '/api/discord'); draw(); } catch { } }, 2000);
+  };
+
+  const setupGroup = () => {
+    const token = h('input', { class: 'input mono', type: 'password', placeholder: 'Bot token', autocomplete: 'off', spellcheck: 'false' });
+    const go = h('button', { class: 'btn btn-primary', type: 'button' }, 'Connect');
+    go.onclick = async () => {
+      go.disabled = true; go.textContent = 'Checking…';
+      const ok = await apply('POST', '/api/discord/token', { token: token.value }, 'Bot connected.');
+      if (!ok) { go.disabled = false; go.textContent = 'Connect'; }
+    };
+    token.addEventListener('keydown', e => { if (e.key === 'Enter') go.click(); });
+    return h('div', { class: 'set-group' },
+      h('h2', {}, 'Connect your bot'),
+      h('p', {}, 'Hostbay uses a bot you create, so it\'s yours: your name, your picture, your Discord servers. It takes about a minute:'),
+      h('ol', { class: 'steps' },
+        h('li', {}, 'Open the ', h('a', { href: 'https://discord.com/developers/applications', target: '_blank', rel: 'noopener' }, 'Discord Developer Portal'), ', click ', h('b', {}, 'New Application'), ' and give it a name, such as "Game Servers".'),
+        h('li', {}, 'Open the ', h('b', {}, 'Bot'), ' page, click ', h('b', {}, 'Reset Token'), ' and copy the token.'),
+        h('li', {}, 'Paste it here. Hostbay keeps it encrypted on this PC and never shows it again.')),
+      h('div', { class: 'acct-add discord-token' }, token, go),
+      h('div', { class: 'dim', style: { fontSize: '12.5px', marginTop: '8px' } }, 'The bot doesn\'t need any of the "Privileged Gateway Intents".'));
+  };
+
+  const statusGroup = () => {
+    const s = d.status;
+    const enabled = h('input', { type: 'checkbox', ...(d.enabled ? { checked: true } : {}) });
+    enabled.onchange = () => apply('PUT', '/api/discord', { enabled: enabled.checked }, enabled.checked ? 'Bot switched on.' : 'Bot switched off.').then(poll);
+    return h('div', { class: 'set-group' },
+      h('h2', {}, 'Bot'),
+      h('div', { class: 'set-rows' },
+        h('div', { class: 'set-row' }, h('label', {}, 'Status'),
+          h('div', {}, h('div', { class: 'inline' }, discordDot(d), h('span', {}, discordSummary(d))),
+            s.state === 'error' ? h('div', { class: 'help' }, 'Paste a new token below to fix it.') : null)),
+        h('div', { class: 'set-row' }, h('label', {}, 'Running'),
+          h('div', { class: 'inline' }, h('span', { class: 'toggle' }, enabled, h('span')), h('span', { class: 'dim' }, d.enabled ? 'The bot is online while Hostbay runs.' : 'Off. The bot shows as offline in Discord.'))),
+        h('div', { class: 'set-row' }, h('label', {}, 'Discord servers'),
+          h('div', {},
+            h('div', { class: 'inline' },
+              d.inviteUrl ? h('a', { class: 'btn btn-small btn-primary', href: d.inviteUrl, target: '_blank', rel: 'noopener' }, 'Add the bot to a Discord server') : null,
+              h('button', { class: 'btn btn-small', type: 'button', onclick: async () => { try { d = await api('GET', '/api/discord'); channels = null; draw(); } catch { } } }, 'Refresh')),
+            h('div', { class: 'help' }, s.state === 'online' && s.guilds === 0
+              ? 'The bot isn\'t in any Discord server yet. Use the button, pick your server and click Authorise. You need the Manage Server permission there.'
+              : 'Opens Discord in your browser. Pick a server and click Authorise.'))),
+        s.state === 'error' ? h('div', { class: 'set-row' }, h('label', {}, 'New token'), setupGroup().querySelector('.discord-token')) : null,
+        h('div', { class: 'set-row' }, h('label', {}, ''),
+          h('div', {}, h('button', { class: 'btn btn-small btn-danger', type: 'button', onclick: async () => {
+            if (await confirmDialog('Disconnect the bot?', 'Hostbay forgets the token and the bot goes offline. A status board already posted stays in Discord but stops updating.', { okText: 'Disconnect', danger: true }))
+              apply('DELETE', '/api/discord/token', undefined, 'Bot disconnected.');
+          } }, 'Disconnect bot')))));
+  };
+
+  const boardGroup = () => {
+    const sel = h('select', { class: 'input select' }, h('option', { value: '' }, channels ? 'Pick a channel' : 'Loading channels…'));
+    const post = h('button', { class: 'btn btn-primary', type: 'button' }, d.board.posted ? 'Move here' : 'Post status board');
+    const fill = () => {
+      sel.replaceChildren(h('option', { value: '' }, channels.length ? 'Pick a channel' : 'The bot isn\'t in any Discord server yet'));
+      for (const g of channels) {
+        sel.append(h('optgroup', { label: g.name }, g.channels.map(c => h('option', { value: c.id, 'data-name': c.name, ...(c.id === d.board.channelId ? { selected: true } : {}) }, `#${c.name}`))));
+      }
+    };
+    if (channels) fill();
+    else if (d.status.state === 'online') api('GET', '/api/discord/channels').then(c => { channels = c; fill(); }).catch(e => sel.replaceChildren(h('option', { value: '' }, e.message)));
+    else sel.replaceChildren(h('option', { value: '' }, 'Waiting for the bot to come online…'));
+    post.onclick = async () => {
+      const opt = sel.selectedOptions[0];
+      if (!sel.value) { toast('Pick a channel first.', 'bad'); return; }
+      post.disabled = true;
+      await apply('POST', '/api/discord/board', { channelId: sel.value, channelName: opt.dataset.name }, `Posted the status board in #${opt.dataset.name}.`);
+      post.disabled = false;
+    };
+    return h('div', { class: 'set-group' },
+      h('h2', {}, 'Status board'),
+      h('p', {}, 'A message that Hostbay keeps up to date in a channel: each server\'s status and address, with buttons that send someone the address to copy.'),
+      d.status.boardError ? h('div', { class: 'notice bad', style: { margin: '0 0 12px' } }, d.status.boardError) : null,
+      h('div', { class: 'set-rows' },
+        d.board.posted ? h('div', { class: 'set-row' }, h('label', {}, 'Posted in'),
+          h('div', { class: 'inline' }, h('span', {}, `#${d.board.channelName || 'a channel'}`),
+            h('button', { class: 'btn btn-small btn-danger', type: 'button', onclick: () => apply('DELETE', '/api/discord/board', undefined, 'Removed the status board.') }, 'Remove'))) : null,
+        h('div', { class: 'set-row' }, h('label', {}, d.board.posted ? 'Move to' : 'Channel'),
+          h('div', {}, h('div', { class: 'inline' }, sel, post),
+            h('div', { class: 'help' }, 'The bot needs View Channel, Send Messages and Embed Links there. Tip: a read-only #servers channel works well.')))));
+  };
+
+  const shareGroup = () => {
+    const host = h('input', { class: 'input mono', type: 'text', value: d.addressHost, placeholder: 'Your public IP (automatic)', spellcheck: 'false' });
+    const all = h('input', { type: 'checkbox', ...(d.allServers ? { checked: true } : {}) });
+    const offline = h('input', { type: 'checkbox', ...(d.showOffline ? { checked: true } : {}) });
+    const priv = h('input', { type: 'checkbox', ...(d.privateReplies ? { checked: true } : {}) });
+    let ids = [...d.serverIds];
+    const list = h('div', { class: 'perm-grid' });
+    const drawList = () => list.replaceChildren(...(all.checked ? [] : d.servers.map(s => {
+      const cb = h('input', { type: 'checkbox', ...(ids.includes(s.id) ? { checked: true } : {}) });
+      cb.onchange = () => { ids = cb.checked ? [...ids, s.id] : ids.filter(x => x !== s.id); };
+      return h('label', { class: 'perm' }, cb, h('span', {}, h('b', {}, s.name), h('small', {}, game(s.gameId).name)));
+    })));
+    all.onchange = drawList;
+    drawList();
+    const save = h('button', { class: 'btn btn-primary btn-small', type: 'button' }, 'Save');
+    save.onclick = () => apply('PUT', '/api/discord', { addressHost: host.value, allServers: all.checked, serverIds: ids, showOffline: offline.checked, privateReplies: priv.checked }, 'Saved. Discord updates in a few seconds.');
+    const toggleRow = (label, cb, text) => h('div', { class: 'set-row' }, h('label', {}, label), h('div', { class: 'inline' }, h('span', { class: 'toggle' }, cb, h('span')), h('span', { class: 'dim' }, text)));
+    return h('div', { class: 'set-group' },
+      h('h2', {}, 'What to share'),
+      h('div', { class: 'notice warn', style: { margin: '0 0 12px' } }, 'Everyone in the Discord servers your bot is in can see these servers and their addresses.'),
+      h('div', { class: 'set-rows' },
+        h('div', { class: 'set-row' }, h('label', {}, 'Address', h('span', { class: 'label-sub' }, 'Shown with each server\'s port')),
+          h('div', {}, host, h('div', { class: 'help' }, 'Leave empty to share your public IP; Hostbay keeps it current. If you have a host name (for example from a dynamic DNS service), enter it to share that instead.'))),
+        toggleRow('All servers', all, 'Including ones you add later'),
+        h('div', { class: 'set-row' }, h('label', {}, ''), list),
+        toggleRow('Offline servers', offline, 'Show servers that aren\'t running too'),
+        toggleRow('Private replies', priv, 'Answers to commands and buttons are only visible to the person who asked'),
+        h('div', { class: 'set-row' }, h('label', {}, ''), h('div', {}, save))));
+  };
+
+  const commandsGroup = () => h('div', { class: 'set-group' },
+    h('h2', {}, 'Commands'),
+    h('p', {}, 'Anyone in your Discord server can use these. New commands can take a minute to show up in Discord.'),
+    h('div', { class: 'set-rows' },
+      h('div', { class: 'set-row' }, h('label', {}, h('code', {}, '/servers')), h('span', {}, 'Every shared server with its status and address.')),
+      h('div', { class: 'set-row' }, h('label', {}, h('code', {}, '/ip')), h('span', {}, 'The address for one server, by itself so it\'s easy to copy (also on phones).'))));
+
+  function draw() {
+    body.replaceChildren(...(d.hasToken ? [statusGroup(), boardGroup(), shareGroup(), commandsGroup()] : [setupGroup()]));
+    poll();
+  }
+  draw();
 }
 
 // ---------------- live server list ----------------

@@ -419,6 +419,72 @@ public static class Api
             return Results.Ok(new { restarting = needsRestart });
         }).Full();
 
+        // ---------- Discord bot (full access) ----------
+
+        api.MapGet("/discord", () => Results.Ok(DiscordDto(mgr, host))).Full();
+
+        api.MapPut("/discord", async (DiscordRequest req) =>
+        {
+            var d = mgr.Settings.Discord;
+            if (req.AddressHost is string ah)
+            {
+                ah = ah.Trim();
+                if (ah.Length > 253 || !System.Text.RegularExpressions.Regex.IsMatch(ah, @"^[A-Za-z0-9.\-:\[\]]*$"))
+                    return Error("Enter a host name like play.example.com, or leave it empty to share your public IP.");
+                d.AddressHost = ah;
+            }
+            if (req.AllServers is bool all) d.AllServers = all;
+            if (req.ServerIds is { } ids) d.ServerIds = ids.Where(id => mgr.Get(id) != null).Distinct().ToList();
+            if (req.ShowOffline is bool off) d.ShowOffline = off;
+            if (req.PrivateReplies is bool pr) d.PrivateReplies = pr;
+            if (req.Enabled is bool en && en != d.Enabled)
+            {
+                d.Enabled = en;
+                mgr.Save();
+                if (en) host.Discord.Start(); else await host.Discord.StopAsync();
+            }
+            mgr.Save();
+            host.Discord.SettingsChanged();
+            return Results.Ok(DiscordDto(mgr, host));
+        }).Full();
+
+        api.MapPost("/discord/token", async (DiscordTokenRequest req) =>
+        {
+            try { await host.Discord.SetTokenAsync(req.Token ?? ""); }
+            catch (Exception ex) when (ex is ArgumentException or InvalidOperationException) { return Error(ex.Message); }
+            await Task.Delay(1500); // usually long enough to come online, so the dialog shows it
+            return Results.Ok(DiscordDto(mgr, host));
+        }).Full();
+
+        api.MapDelete("/discord/token", async () =>
+        {
+            await host.Discord.ForgetAsync();
+            return Results.Ok(DiscordDto(mgr, host));
+        }).Full();
+
+        api.MapGet("/discord/channels", async () =>
+        {
+            try { return Results.Ok(await host.Discord.ChannelsAsync()); }
+            catch (DiscordException ex) { return Error($"Discord said: {ex.Message}"); }
+            catch (Exception ex) when (ex is InvalidOperationException or System.Net.Http.HttpRequestException) { return Error("Couldn't reach Discord. Check the bot is connected."); }
+        }).Full();
+
+        api.MapPost("/discord/board", async (DiscordBoardRequest req) =>
+        {
+            if (string.IsNullOrEmpty(req.ChannelId)) return Error("Pick a channel.");
+            try { await host.Discord.PostBoardAsync(req.ChannelId, req.ChannelName ?? ""); }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+            catch (System.Net.Http.HttpRequestException) { return Error("Couldn't reach Discord."); }
+            return Results.Ok(DiscordDto(mgr, host));
+        }).Full();
+
+        api.MapDelete("/discord/board", async () =>
+        {
+            try { await host.Discord.RemoveBoardAsync(); }
+            catch (System.Net.Http.HttpRequestException) { return Error("Couldn't reach Discord."); }
+            return Results.Ok(DiscordDto(mgr, host));
+        }).Full();
+
         // ---------- accounts & groups (full access) ----------
 
         api.MapGet("/accounts", () => Results.Ok(AccountsDto(mgr, host))).Full();
@@ -606,6 +672,29 @@ public static class Api
         remoteAccess = mgr.Settings.RemoteAccess,
     };
 
+    /// <summary>Discord setup for the UI. The token itself never leaves the host.</summary>
+    private static object DiscordDto(ServerManager mgr, WebHost host)
+    {
+        var d = mgr.Settings.Discord;
+        return new
+        {
+            status = host.Discord.Status,
+            hasToken = host.Discord.HasToken,
+            enabled = d.Enabled,
+            inviteUrl = host.Discord.InviteUrl,
+            board = new { channelId = d.BoardChannelId, channelName = d.BoardChannelName, posted = d.BoardMessageId.Length > 0 },
+            allServers = d.AllServers,
+            serverIds = d.ServerIds,
+            addressHost = d.AddressHost,
+            showOffline = d.ShowOffline,
+            privateReplies = d.PrivateReplies,
+            servers = mgr.Settings.Servers.Select(s => new { s.Id, s.Name, s.GameId }),
+        };
+    }
+
+    private sealed record DiscordRequest(bool? Enabled, bool? AllServers, List<string>? ServerIds, string? AddressHost, bool? ShowOffline, bool? PrivateReplies);
+    private sealed record DiscordTokenRequest(string? Token);
+    private sealed record DiscordBoardRequest(string? ChannelId, string? ChannelName);
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);

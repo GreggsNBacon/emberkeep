@@ -26,6 +26,7 @@ public sealed class WebHost
         _mgr = mgr;
         Auth = new AuthService(mgr);
         Ports = new RouterPortService(mgr);
+        Discord = new DiscordBot(mgr);
     }
 
     public AuthService Auth { get; }
@@ -33,6 +34,8 @@ public sealed class WebHost
     public PortForwarder Forwarder { get; } = new();
     /// <summary>Opens servers' ports on the router, through PortHop when available.</summary>
     public RouterPortService Ports { get; }
+    /// <summary>Optional Discord bot that shares server status and join addresses.</summary>
+    public DiscordBot Discord { get; }
     public int Port { get; private set; }
     public bool ListeningOnLan { get; private set; }
     public string LocalUrl => $"http://127.0.0.1:{Port}";
@@ -54,6 +57,7 @@ public sealed class WebHost
                 await app.StartAsync();
                 _app = app; Port = port; ListeningOnLan = lan;
                 ApplyForwarding();
+                Discord.Start();
                 return;
             }
             catch (Exception ex) when (ex is IOException || ex.InnerException is SocketException || ex is SocketException)
@@ -80,6 +84,7 @@ public sealed class WebHost
     public async Task StopAsync()
     {
         await Forwarder.CloseAsync(); // take the port back off the router on exit
+        await Discord.StopAsync();
         if (_app != null) { using (var cts = new System.Threading.CancellationTokenSource(2000)) await _app.StopAsync(cts.Token); await _app.DisposeAsync(); _app = null; }
     }
 
