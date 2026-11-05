@@ -65,6 +65,8 @@ public sealed class AppSettings
     public string PasswordHash { get; set; } = "";
     public string PasswordSalt { get; set; } = "";
     public bool MinimizeToTray { get; set; } = true;
+    public List<UserAccount> Users { get; set; } = new();
+    public List<UserGroup> Groups { get; set; } = new();
     public List<ServerInstance> Servers { get; set; } = new();
 }
 

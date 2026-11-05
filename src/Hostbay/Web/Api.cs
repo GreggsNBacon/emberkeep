@@ -2,81 +2,147 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
-using System.Text;
 using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 using Hostbay.Core;
 using Microsoft.AspNetCore.Builder;
 using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Routing;
 
 namespace Hostbay.Web;
 
+/// <summary>
+/// The REST API. Every endpoint states what it needs, and the check runs on the server before the handler:
+/// hiding a button in the page is only a convenience, never the protection.
+///   .See()        the signed-in account's group can see this server
+///   .Need(perm)   ...and has that permission (for app-wide actions: has it at all)
+///   .Full()       full access only (accounts, app settings)
+/// </summary>
 public static class Api
 {
     public static void Map(WebApplication app, ServerManager mgr, WebHost host)
     {
         var api = app.MapGroup("/api");
 
+        // ---------- who am I ----------
+
+        api.MapGet("/me", (HttpContext ctx) =>
+        {
+            var p = WebHost.Who(ctx);
+            return Results.Ok(new
+            {
+                username = p.Username, isLocal = p.IsLocal, full = p.Full,
+                permissions = p.Full ? Permissions.All.Select(a => a.Id).ToList() : p.Perms.ToList(),
+                allServers = p.AllServers,
+                canAddServers = p.CanAnywhere(Permissions.Launch) && p.AllServers,
+            });
+        });
+
+        api.MapPost("/me/password", (HttpContext ctx, ChangePasswordRequest req) =>
+        {
+            var p = WebHost.Who(ctx);
+            try
+            {
+                host.Auth.ChangeOwnPassword(p, req.Current ?? "", req.Next ?? "");
+                // The change signed this account out everywhere, including here; hand back a fresh session.
+                if (host.Auth.RenewSession(p) is { } sid) WebHost.SetSessionCookie(ctx, sid);
+                host.ApplyForwarding();
+                return Results.Ok();
+            }
+            catch (Exception ex) when (ex is ArgumentException or UnauthorizedAccessException or InvalidOperationException) { return Error(ex.Message); }
+        });
+
         // ---------- catalog & state ----------
 
         api.MapGet("/games", () => GameCatalog.All.Select(GameDto));
 
-        api.MapGet("/servers", () => mgr.Runtimes.Select(Summary));
+        api.MapGet("/servers", (HttpContext ctx) => Visible(mgr, ctx).Select(Summary));
 
-        api.MapGet("/servers/{id}", (string id) => mgr.Get(id) is { } rt ? Results.Ok(Detail(rt)) : Results.NotFound());
+        api.MapGet("/servers/{id}", (string id, HttpContext ctx) =>
+            mgr.Get(id) is { } rt ? Results.Ok(Detail(rt, WebHost.Who(ctx))) : Results.NotFound()).See();
 
-        api.MapPost("/servers", (CreateServerRequest req) =>
+        api.MapPost("/servers", (CreateServerRequest req, HttpContext ctx) =>
         {
+            if (!WebHost.Who(ctx).AllServers) return Error("Your group only sees some servers, so it can't add new ones.", 403);
             if (string.IsNullOrWhiteSpace(req.InstallDir) || !Directory.Exists(req.InstallDir))
                 return Error("That folder doesn't exist.");
             var game = GameCatalog.Get(req.GameId ?? "generic");
             var inst = GameCatalog.CreateInstance(game, Path.GetFullPath(req.InstallDir), string.IsNullOrWhiteSpace(req.Name) ? null : req.Name.Trim(), req.SteamAppId);
             var rt = mgr.Add(inst);
-            return Results.Ok(Detail(rt));
-        });
+            return Results.Ok(Detail(rt, WebHost.Who(ctx)));
+        }).Need(Permissions.Launch);
 
-        api.MapPut("/servers/{id}", (string id, ServerInstance body) =>
+        api.MapPut("/servers/{id}", (string id, ServerInstance body, HttpContext ctx) =>
         {
             var rt = mgr.Get(id);
             if (rt == null) return Results.NotFound();
+            var p = WebHost.Who(ctx);
+            bool canSettings = p.Can(Permissions.Settings, id) || p.Can(Permissions.Launch, id);
+            bool canLaunch = p.Can(Permissions.Launch, id);
+            if (!canSettings) return Forbidden();
+
+            // Start from what's saved and copy over only the fields this account may change; anything else in
+            // the request is ignored, so a crafted request can't slip a launch change through.
+            var cur = rt.Config;
+            var next = JsonSerializer.Deserialize<ServerInstance>(JsonSerializer.Serialize(cur, ServerManager.Json), ServerManager.Json)!;
             if (string.IsNullOrWhiteSpace(body.Name)) return Error("The server needs a name.");
-            body.Environment ??= new();
-            body.StopCommands ??= new();
-            body.ExtraLogFiles ??= new();
-            body.Rcon ??= new();
-            body.StopTimeoutSeconds = Math.Clamp(body.StopTimeoutSeconds, 5, 900);
-            if (!string.IsNullOrWhiteSpace(body.ForwardPorts))
+            next.Name = body.Name.Trim();
+            next.AutoRestart = body.AutoRestart;
+            next.CommandChannel = body.CommandChannel;
+            next.StopMethod = body.StopMethod;
+            next.StopCommands = body.StopCommands ?? new();
+            next.StopTimeoutSeconds = Math.Clamp(body.StopTimeoutSeconds, 5, 900);
+            next.Rcon = body.Rcon ?? new();
+            next.RconFromConfig = body.RconFromConfig;
+            next.JoinPort = body.JoinPort;
+            next.ArtAppId = body.ArtAppId;
+            next.ForwardWhileRunning = body.ForwardWhileRunning;
+            next.ForwardPorts = body.ForwardPorts;
+            if (!string.IsNullOrWhiteSpace(next.ForwardPorts))
             {
-                try { body.ForwardPorts = RouterPorts.Format(RouterPorts.Parse(body.ForwardPorts)); } // tidy: "udp 1-2,tcp 3" -> "UDP 1-2, TCP 3"
+                try { next.ForwardPorts = RouterPorts.Format(RouterPorts.Parse(next.ForwardPorts)); } // tidy: "udp 1-2,tcp 3" -> "UDP 1-2, TCP 3"
                 catch (FormatException ex) { return Error($"Router ports: {ex.Message}"); }
             }
-            mgr.Update(id, body);
-            return Results.Ok(Detail(rt));
-        });
+            if (canLaunch)
+            {
+                // These decide what runs and which files are read: they can run any program on this PC.
+                next.GameId = body.GameId;
+                next.InstallDir = body.InstallDir;
+                next.Executable = body.Executable;
+                next.Arguments = body.Arguments;
+                next.WorkingDirectory = body.WorkingDirectory;
+                next.Environment = body.Environment ?? new();
+                next.ExtraLogFiles = body.ExtraLogFiles ?? new();
+                next.SteamAppId = body.SteamAppId;
+            }
+            mgr.Update(id, next);
+            return Results.Ok(Detail(rt, p));
+        }).See();
 
         api.MapDelete("/servers/{id}", (string id) =>
         {
-            try { mgr.Remove(id); return Results.Ok(); }
+            try { mgr.Remove(id); host.Auth.ForgetServer(id); mgr.Save(); return Results.Ok(); }
             catch (InvalidOperationException ex) { return Error(ex.Message); }
-        });
+        }).Need(Permissions.Launch);
 
-        api.MapPost("/servers/reorder", (List<string> ids) => { mgr.Reorder(ids); return Results.Ok(); });
+        api.MapPost("/servers/reorder", (List<string> ids) => { mgr.Reorder(ids); return Results.Ok(); }).Full();
 
         // ---------- control ----------
 
-        api.MapPost("/servers/{id}/start", (string id) => Control(mgr, id, rt => { _ = rt.StartAsync(); }));
-        api.MapPost("/servers/{id}/stop", (string id) => Control(mgr, id, rt => { _ = rt.StopAsync(); }));
-        api.MapPost("/servers/{id}/restart", (string id) => Control(mgr, id, rt => { _ = rt.RestartAsync(); }));
-        api.MapPost("/servers/{id}/kill", (string id) => Control(mgr, id, rt => rt.Kill()));
-        api.MapPost("/servers/{id}/logs/clear", (string id) => Control(mgr, id, rt => rt.Logs.Clear()));
+        api.MapPost("/servers/{id}/start", (string id) => Control(mgr, id, rt => { _ = rt.StartAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/stop", (string id) => Control(mgr, id, rt => { _ = rt.StopAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/restart", (string id) => Control(mgr, id, rt => { _ = rt.RestartAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/kill", (string id) => Control(mgr, id, rt => rt.Kill())).Need(Permissions.Kill);
+        api.MapPost("/servers/{id}/logs/clear", (string id) => Control(mgr, id, rt => rt.Logs.Clear())).Need(Permissions.Console);
 
-        api.MapPost("/servers/{id}/command", async (string id, CommandRequest req) =>
+        api.MapPost("/servers/{id}/command", async (string id, CommandRequest req, HttpContext ctx) =>
         {
             var rt = mgr.Get(id);
             if (rt == null) return Results.NotFound();
             try
             {
+                rt.Logs.Add("system", $"Command from {WebHost.Who(ctx).Username}:");
                 var reply = await rt.SendCommandAsync(req.Command ?? "");
                 return Results.Ok(new { reply });
             }
@@ -85,12 +151,14 @@ public static class Api
                 rt.Logs.Add("error", ex.Message);
                 return Error(ex.Message);
             }
-        });
+        }).Need(Permissions.Console);
 
         // ---------- live streams (Server-Sent Events) ----------
+        // Streams re-check the session on every update, so a signed-out or disabled account stops receiving data.
 
         api.MapGet("/events", async (HttpContext ctx) =>
         {
+            var cookie = ctx.Request.Cookies[AuthService.CookieName];
             PrepareSse(ctx);
             using var signal = new SemaphoreSlim(0);
             void OnChange() { if (signal.CurrentCount == 0) signal.Release(); }
@@ -99,7 +167,9 @@ public static class Api
             {
                 while (!ctx.RequestAborted.IsCancellationRequested)
                 {
-                    var payload = JsonSerializer.Serialize(mgr.Runtimes.Select(Summary), ServerManager.JsonCompact);
+                    var who = host.Auth.Resolve(cookie);
+                    if (who == null) break;
+                    var payload = JsonSerializer.Serialize(mgr.Runtimes.Where(r => who.CanSee(r.Config.Id)).Select(Summary), ServerManager.JsonCompact);
                     await ctx.Response.WriteAsync($"event: servers\ndata: {OneLine(payload)}\n\n", ctx.RequestAborted);
                     await ctx.Response.Body.FlushAsync(ctx.RequestAborted);
                     await signal.WaitAsync(TimeSpan.FromSeconds(2), ctx.RequestAborted);
@@ -114,6 +184,7 @@ public static class Api
         {
             var rt = mgr.Get(id);
             if (rt == null) { ctx.Response.StatusCode = 404; return; }
+            var cookie = ctx.Request.Cookies[AuthService.CookieName];
             PrepareSse(ctx);
             var (backlog, ch) = rt.Logs.Subscribe();
             try
@@ -122,6 +193,7 @@ public static class Api
                 var batch = new List<LogLine>();
                 while (await ch.Reader.WaitToReadAsync(ctx.RequestAborted))
                 {
+                    if (host.Auth.Resolve(cookie) is not { } who || !who.CanSee(id)) break;
                     batch.Clear();
                     while (batch.Count < 500 && ch.Reader.TryRead(out var line)) batch.Add(line);
                     await WriteEvent(ctx, "lines", batch);
@@ -130,9 +202,9 @@ public static class Api
             }
             catch (OperationCanceledException) { }
             finally { rt.Logs.Unsubscribe(ch); }
-        });
+        }).See();
 
-        // ---------- config files ----------
+        // ---------- config files (often hold admin passwords, so they need their own permission) ----------
 
         api.MapGet("/servers/{id}/configs", (string id) =>
         {
@@ -145,7 +217,7 @@ public static class Api
                 files,
                 template = missing is { } m ? new { source = m.Source, destination = m.Destination } : null,
             });
-        });
+        }).Need(Permissions.Configs);
 
         api.MapGet("/servers/{id}/configs/file", (string id, string path) =>
         {
@@ -164,9 +236,9 @@ public static class Api
                 modified = fi.LastWriteTimeUtc,
                 running = rt.State != ServerState.Stopped,
             });
-        });
+        }).Need(Permissions.Configs);
 
-        api.MapPut("/servers/{id}/configs/file", (string id, SaveFileRequest req) =>
+        api.MapPut("/servers/{id}/configs/file", (string id, SaveFileRequest req, HttpContext ctx) =>
         {
             var rt = mgr.Get(id);
             if (rt == null) return Results.NotFound();
@@ -177,18 +249,19 @@ public static class Api
             try
             {
                 var backup = ConfigFiles.Write(rt.Config, req.Path, req.Content ?? "");
+                rt.Logs.Add("system", $"{WebHost.Who(ctx).Username} saved {Path.GetFileName(req.Path)}.");
                 return Results.Ok(new { modified = new FileInfo(req.Path).LastWriteTimeUtc, backup });
             }
             catch (Exception ex) { return Error($"Couldn't save: {ex.Message}"); }
-        });
+        }).Need(Permissions.Configs);
 
         api.MapGet("/servers/{id}/configs/backups", (string id, string path) =>
         {
             var rt = mgr.Get(id);
             if (rt == null) return Results.NotFound();
             if (!ConfigDiscovery.IsAllowed(rt.Config, path)) return Error("Not allowed.", 403);
-            return Results.Ok(ConfigFiles.ListBackups(rt.Config, path));
-        });
+            return Results.Ok(ConfigFiles.ListBackups(rt.Config, path).Select(b => new { b.Name, b.Created, b.Size }));
+        }).Need(Permissions.Configs);
 
         api.MapGet("/servers/{id}/configs/backup", (string id, string path, string backup) =>
         {
@@ -199,7 +272,7 @@ public static class Api
             if (file == null) return Results.NotFound();
             var (text, _, _) = ConfigFiles.Read(file.FullPath);
             return Results.Ok(new { content = text });
-        });
+        }).Need(Permissions.Configs);
 
         api.MapPost("/servers/{id}/configs/from-template", (string id) =>
         {
@@ -215,9 +288,9 @@ public static class Api
             int idx = text.IndexOf("[/Script/", StringComparison.Ordinal);
             File.WriteAllText(dst, idx > 0 ? text[idx..] : text);
             return Results.Ok(new { path = dst });
-        });
+        }).Need(Permissions.Configs);
 
-        // ---------- discovery ----------
+        // ---------- discovery (browsing the host's disks: launch permission) ----------
 
         api.MapGet("/scan/steam", () =>
         {
@@ -229,13 +302,13 @@ public static class Api
                 libraries = root != null ? SteamScanner.FindLibraries(root) : new List<string>(),
                 candidates = SteamScanner.Scan(mgr.Settings.Servers),
             });
-        });
+        }).Need(Permissions.Launch);
 
         api.MapGet("/scan/folder", (string path) =>
         {
             if (!Directory.Exists(path)) return Error("That folder doesn't exist.");
             return Results.Ok(SteamScanner.ScanFolder(Path.GetFullPath(path), mgr.Settings.Servers));
-        });
+        }).Need(Permissions.Launch);
 
         api.MapGet("/fs", (string? path, bool? files) =>
         {
@@ -262,11 +335,9 @@ public static class Api
                 return Results.Ok(new { path = dir.FullName, parent = dir.Parent?.FullName ?? "", entries });
             }
             catch (UnauthorizedAccessException) { return Error("Access to that folder is denied."); }
-        });
+        }).Need(Permissions.Launch);
 
-        // ---------- app settings ----------
-
-        api.MapGet("/settings", () => SettingsDto(mgr, host));
+        // ---------- network, artwork, join address ----------
 
         // This PC's addresses for "Copy address" and "Fill current IP". The public IP is only
         // looked up (via ipify.org) when the UI asks for it.
@@ -289,26 +360,31 @@ public static class Api
         {
             try { return Results.Ok(await ArtCache.SearchAsync(q)); }
             catch { return Error("Couldn't reach the Steam store. Check your internet connection."); }
-        });
+        }).Need(Permissions.Settings);
 
         api.MapGet("/servers/{id}/join", (string id) =>
-            mgr.Get(id) is { } rt ? Results.Ok(JoinInfo.Resolve(rt.Config)) : Results.NotFound());
+            mgr.Get(id) is { } rt ? Results.Ok(JoinInfo.Resolve(rt.Config)) : Results.NotFound()).See();
 
         // ---------- router ports (through PortHop when available) ----------
 
         api.MapGet("/servers/{id}/ports", async (string id, bool? refresh) =>
-            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.StatusAsync(rt.Config, refresh == true)) : Results.NotFound());
+            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.StatusAsync(rt.Config, refresh == true)) : Results.NotFound()).See();
 
         api.MapPost("/servers/{id}/ports/open", async (string id) =>
-            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.OpenAsync(rt.Config)) : Results.NotFound());
+            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.OpenAsync(rt.Config)) : Results.NotFound()).Need(Permissions.Ports);
 
         api.MapPost("/servers/{id}/ports/close", async (string id) =>
-            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.CloseAsync(rt.Config)) : Results.NotFound());
+            mgr.Get(id) is { } rt ? Results.Ok(await host.Ports.CloseAsync(rt.Config)) : Results.NotFound()).Need(Permissions.Ports);
 
         api.MapGet("/porthop", async () => Results.Ok(await PortHopClient.InfoAsync()));
 
+        // Opens a window on the host PC itself.
         api.MapPost("/porthop/show", async () =>
-            await PortHopClient.ShowAsync() ? Results.Ok() : Error("PortHop isn't installed on this PC."));
+            await PortHopClient.ShowAsync() ? Results.Ok() : Error("PortHop isn't installed on this PC.")).Full();
+
+        // ---------- app settings (full access) ----------
+
+        api.MapGet("/settings", () => SettingsDto(mgr, host)).Full();
 
         api.MapPut("/settings", (SettingsRequest req) =>
         {
@@ -322,7 +398,7 @@ public static class Api
             }
             if (req.RemoteAccess is bool remote)
             {
-                if (remote && !host.Auth.HasPassword) return Error("Set a password before turning on remote access.");
+                if (remote && !host.Auth.HasAccounts) return Error("Create an account before turning on remote access.");
                 needsRestart |= remote != host.ListeningOnLan;
                 s.RemoteAccess = remote;
                 if (!remote) s.InternetAccess = false; // internet access rides on remote access
@@ -332,8 +408,8 @@ public static class Api
             {
                 if (internet && !(req.RemoteAccess ?? s.RemoteAccess))
                     return Error("Turn on remote access first.");
-                if (internet && !s.LongPassword)
-                    return Error($"Use a password of at least {AuthService.MinInternetPasswordLength} characters before opening Hostbay to the internet.");
+                if (internet && !host.Auth.AllPasswordsLong)
+                    return Error($"Every enabled account needs a password of at least {AuthService.MinInternetPasswordLength} characters before Hostbay can face the internet.");
                 s.InternetAccess = internet;
             }
             mgr.Save();
@@ -341,18 +417,73 @@ public static class Api
             if (needsRestart) _ = Task.Run(async () => { await Task.Delay(300); await host.RestartAsync(); });
             else host.ApplyForwarding();
             return Results.Ok(new { restarting = needsRestart });
-        });
+        }).Full();
 
-        api.MapPost("/settings/password", (PasswordRequest req, HttpContext ctx) =>
+        // ---------- accounts & groups (full access) ----------
+
+        api.MapGet("/accounts", () => Results.Ok(AccountsDto(mgr, host))).Full();
+
+        api.MapPost("/accounts/users", (NewUserRequest req) => Guard(() =>
         {
-            try
-            {
-                host.Auth.SetPassword(req.Password ?? "", ctx.Request.Cookies[AuthService.CookieName]);
-                host.ApplyForwarding(); // a short password switches internet access off
-                return Results.Ok(SettingsDto(mgr, host));
-            }
-            catch (ArgumentException ex) { return Error(ex.Message); }
-        });
+            host.Auth.CreateUser(req.Username ?? "", req.Password ?? "", req.GroupId ?? "");
+            host.ApplyForwarding();
+        }, () => AccountsDto(mgr, host))).Full();
+
+        api.MapPut("/accounts/users/{uid}", (string uid, UpdateUserRequest req) => Guard(() =>
+        {
+            host.Auth.UpdateUser(uid, req.GroupId, req.Disabled, req.Password);
+            host.ApplyForwarding();
+        }, () => AccountsDto(mgr, host))).Full();
+
+        api.MapDelete("/accounts/users/{uid}", (string uid) => Guard(() =>
+        {
+            host.Auth.DeleteUser(uid);
+            if (!host.Auth.HasAccounts && host.ListeningOnLan) _ = Task.Run(host.RestartAsync); // nobody left to sign in remotely
+            host.ApplyForwarding();
+        }, () => AccountsDto(mgr, host))).Full();
+
+        api.MapPost("/accounts/groups", (UserGroup req) => Guard(() => host.Auth.SaveGroup(req), () => AccountsDto(mgr, host))).Full();
+
+        api.MapDelete("/accounts/groups/{gid}", (string gid) => Guard(() => host.Auth.DeleteGroup(gid), () => AccountsDto(mgr, host))).Full();
+    }
+
+    // ---------- permission checks (endpoint filters) ----------
+
+    private static string? RouteId(HttpContext ctx) => ctx.GetRouteValue("id") as string;
+
+    /// <summary>The account's group must be able to see the server named in the route.</summary>
+    private static RouteHandlerBuilder See(this RouteHandlerBuilder b) => b.AddEndpointFilter(async (c, next) =>
+    {
+        var p = WebHost.Who(c.HttpContext);
+        var id = RouteId(c.HttpContext);
+        return id != null && !p.CanSee(id) ? Results.NotFound() : await next(c); // don't even confirm it exists
+    });
+
+    /// <summary>Needs <paramref name="perm"/> on the server in the route, or anywhere for app-wide actions.</summary>
+    private static RouteHandlerBuilder Need(this RouteHandlerBuilder b, string perm) => b.AddEndpointFilter(async (c, next) =>
+    {
+        var p = WebHost.Who(c.HttpContext);
+        var id = RouteId(c.HttpContext);
+        if (id != null && !p.CanSee(id)) return Results.NotFound();
+        bool ok = id != null ? p.Can(perm, id) : p.CanAnywhere(perm);
+        return ok ? await next(c) : Forbidden();
+    });
+
+    private static RouteHandlerBuilder Full(this RouteHandlerBuilder b) => b.AddEndpointFilter(async (c, next) =>
+        WebHost.Who(c.HttpContext).Full ? await next(c) : Forbidden());
+
+    private static IResult Forbidden() => Error("Your account isn't allowed to do that. Ask the host to change your group's permissions.", 403);
+
+    private static IEnumerable<ServerRuntime> Visible(ServerManager mgr, HttpContext ctx)
+    {
+        var p = WebHost.Who(ctx);
+        return mgr.Runtimes.Where(r => p.CanSee(r.Config.Id));
+    }
+
+    private static IResult Guard(Action action, Func<object> result)
+    {
+        try { action(); return Results.Ok(result()); }
+        catch (Exception ex) when (ex is ArgumentException or InvalidOperationException or KeyNotFoundException) { return Error(ex.Message); }
     }
 
     // ---------- helpers ----------
@@ -409,18 +540,39 @@ public static class Api
         artAppId = ArtCache.AppIdFor(rt.Config),
     };
 
-    private static object Detail(ServerRuntime rt)
+    private const string Hidden = "(hidden: needs the launch settings permission)";
+
+    /// <summary>A server's details, trimmed to what this account may see.</summary>
+    private static object Detail(ServerRuntime rt, Principal p)
     {
-        var rc = rt.Config.CommandChannel is CommandChannel.Rcon or CommandChannel.Telnet ? rt.ResolveRemoteConsole() : null;
+        string id = rt.Config.Id;
+        bool canLaunch = p.Can(Permissions.Launch, id);
+        bool canSettings = canLaunch || p.Can(Permissions.Settings, id);
+        var can = Permissions.All.Where(a => p.Can(a.Id, id)).Select(a => a.Id).ToList();
+
+        ServerInstance? config = null;
+        if (canSettings)
+        {
+            config = JsonSerializer.Deserialize<ServerInstance>(JsonSerializer.Serialize(rt.Config, ServerManager.Json), ServerManager.Json)!;
+            if (!canLaunch)
+            {
+                // Launch arguments and environment often carry passwords (Valheim's -password, tokens…).
+                config.Arguments = Hidden;
+                config.Environment = new();
+                config.ExtraLogFiles = new();
+            }
+        }
+        var rc = canSettings && rt.Config.CommandChannel is CommandChannel.Rcon or CommandChannel.Telnet ? rt.ResolveRemoteConsole() : null;
         return new
         {
             summary = Summary(rt),
-            config = rt.Config,
-            resolvedExecutable = rt.ResolveExecutable(),
-            resolvedWorkingDirectory = rt.ResolveWorkingDirectory(),
+            can,
+            config,
+            resolvedExecutable = canSettings ? rt.ResolveExecutable() : null,
+            resolvedWorkingDirectory = canSettings ? rt.ResolveWorkingDirectory() : null,
             installDirExists = Directory.Exists(rt.Config.InstallDir),
             remoteConsole = rc == null ? null : new { rc.Host, rc.Port, hasPassword = rc.Password.Length > 0 },
-            logFiles = rt.LogFilePatterns(),
+            logFiles = canLaunch ? rt.LogFilePatterns() : Enumerable.Empty<string>(),
             join = JoinInfo.Resolve(rt.Config),
         };
     }
@@ -431,10 +583,10 @@ public static class Api
         configuredPort = mgr.Settings.Port,
         remoteAccess = mgr.Settings.RemoteAccess,
         listeningOnLan = host.ListeningOnLan,
-        hasPassword = host.Auth.HasPassword,
+        hasAccounts = host.Auth.HasAccounts,
         minimizeToTray = mgr.Settings.MinimizeToTray,
         internetAccess = mgr.Settings.InternetAccess,
-        longPassword = mgr.Settings.LongPassword,
+        longPassword = host.Auth.AllPasswordsLong,
         minInternetPasswordLength = AuthService.MinInternetPasswordLength,
         forwarding = host.Forwarder.Status,
         lanUrls = NetworkInfo.LocalAddresses().Select(a => $"http://{a.Address}:{host.Port}"),
@@ -442,82 +594,24 @@ public static class Api
         version = typeof(Api).Assembly.GetName().Version?.ToString(3),
     };
 
+    /// <summary>Accounts (never their password hashes), groups, the permission list and the servers groups can pick.</summary>
+    private static object AccountsDto(ServerManager mgr, WebHost host) => new
+    {
+        users = mgr.Settings.Users.Select(u => new { u.Id, u.Username, u.GroupId, u.Disabled, u.LongPassword, u.CreatedAt, u.LastSignIn }),
+        groups = mgr.Settings.Groups.Select(g => new { g.Id, g.Name, g.FullAccess, g.Permissions, g.AllServers, g.ServerIds, g.BuiltIn, members = mgr.Settings.Users.Count(u => u.GroupId == g.Id) }),
+        permissions = Permissions.All.Select(a => new { id = a.Id, label = a.Label, help = a.Help, risky = a.Id == Permissions.Launch }),
+        servers = mgr.Settings.Servers.Select(s => new { s.Id, s.Name, s.GameId }),
+        minPasswordLength = AuthService.MinPasswordLength,
+        minInternetPasswordLength = AuthService.MinInternetPasswordLength,
+        remoteAccess = mgr.Settings.RemoteAccess,
+    };
+
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
     private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess);
-    private sealed record PasswordRequest(string? Password);
+    private sealed record ChangePasswordRequest(string? Current, string? Next);
+    private sealed record NewUserRequest(string? Username, string? Password, string? GroupId);
+    private sealed record UpdateUserRequest(string? GroupId, bool? Disabled, string? Password);
     private sealed record FsEntry(string Name, string Path, bool IsDir);
-}
-
-/// <summary>Reads and writes config files while preserving their encoding and line endings, with backups.</summary>
-public static class ConfigFiles
-{
-    private const int KeepBackups = 25;
-
-    public static (string Text, Encoding Encoding, string Newline) Read(string path)
-    {
-        var bytes = File.ReadAllBytes(path);
-        Encoding enc;
-        if (bytes.Length >= 3 && bytes[0] == 0xEF && bytes[1] == 0xBB && bytes[2] == 0xBF) enc = new UTF8Encoding(true);
-        else if (bytes.Length >= 2 && bytes[0] == 0xFF && bytes[1] == 0xFE) enc = new UnicodeEncoding(false, true);
-        else if (bytes.Length >= 2 && bytes[0] == 0xFE && bytes[1] == 0xFF) enc = new UnicodeEncoding(true, true);
-        else enc = new UTF8Encoding(false);
-        var text = enc.GetString(bytes, enc.GetPreamble().Length, bytes.Length - enc.GetPreamble().Length);
-        var newline = text.Contains("\r\n") || !text.Contains('\n') ? "\r\n" : "\n";
-        return (text, enc, newline);
-    }
-
-    /// <summary>Saves new content, keeping the file's encoding and line endings. Returns the backup file name, if any.</summary>
-    public static string? Write(ServerInstance s, string path, string content)
-    {
-        Encoding enc = new UTF8Encoding(false);
-        string newline = "\r\n";
-        string? backup = null;
-        if (File.Exists(path))
-        {
-            (_, enc, newline) = Read(path);
-            backup = Backup(s, path);
-        }
-        var normalized = content.Replace("\r\n", "\n");
-        if (newline == "\r\n") normalized = normalized.Replace("\n", "\r\n");
-        Directory.CreateDirectory(Path.GetDirectoryName(path)!);
-        var tmp = path + ".hostbay-tmp";
-        using (var fs = new FileStream(tmp, FileMode.Create, FileAccess.Write))
-        {
-            var pre = enc.GetPreamble();
-            fs.Write(pre);
-            fs.Write(enc.GetBytes(normalized));
-        }
-        File.Move(tmp, path, overwrite: true);
-        return backup;
-    }
-
-    private static string BackupFolder(ServerInstance s, string path)
-    {
-        // One folder per server and file, keyed by a short hash of the full path so same-named files don't collide.
-        path = Path.GetFullPath(path);
-        var hash = Convert.ToHexString(System.Security.Cryptography.SHA1.HashData(Encoding.UTF8.GetBytes(path.ToLowerInvariant())))[..8];
-        return Path.Combine(ServerManager.BackupDir, s.Id, Path.GetFileName(path) + "-" + hash);
-    }
-
-    public static string Backup(ServerInstance s, string path)
-    {
-        var dir = BackupFolder(s, path);
-        Directory.CreateDirectory(dir);
-        // Millisecond stamps keep names unique and sortable.
-        var name = DateTime.Now.ToString("yyyy-MM-dd_HH-mm-ss-fff") + Path.GetExtension(path);
-        File.Copy(path, Path.Combine(dir, name), overwrite: true);
-        foreach (var old in new DirectoryInfo(dir).GetFiles().OrderByDescending(f => f.Name).Skip(KeepBackups)) old.Delete();
-        return name;
-    }
-
-    public sealed record BackupInfo(string Name, string FullPath, DateTime Created, long Size);
-
-    public static List<BackupInfo> ListBackups(ServerInstance s, string path)
-    {
-        var dir = new DirectoryInfo(BackupFolder(s, Path.GetFullPath(path)));
-        if (!dir.Exists) return new();
-        return dir.GetFiles().OrderByDescending(f => f.Name).Select(f => new BackupInfo(f.Name, f.FullName, f.LastWriteTimeUtc, f.Length)).ToList();
-    }
 }

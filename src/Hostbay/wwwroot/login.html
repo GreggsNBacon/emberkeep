@@ -11,8 +11,9 @@
 <form class="login" id="f">
   <div class="brand"><img src="/favicon.svg" alt="" width="28" height="28"><span>Hostbay</span></div>
   <h1>Sign in</h1>
-  <p>Enter the remote access password set in Hostbay on the host PC.</p>
-  <input class="input" id="pw" type="password" autocomplete="current-password" aria-label="Password" placeholder="Password" autofocus required>
+  <p>Sign in with the account the host made for you.</p>
+  <input class="input" id="user" type="text" autocomplete="username" aria-label="Username" placeholder="Username" autofocus required spellcheck="false" autocapitalize="off">
+  <input class="input" id="pw" type="password" autocomplete="current-password" aria-label="Password" placeholder="Password" required>
   <button class="btn btn-primary" type="submit">Sign in</button>
   <div class="err" id="err" role="alert"></div>
 </form>
@@ -25,7 +26,7 @@ document.getElementById('f').addEventListener('submit', async e => {
     const r = await fetch('/auth/login', {
       method: 'POST', credentials: 'same-origin',
       headers: { 'Content-Type': 'application/json', 'X-Hostbay': '1' },
-      body: JSON.stringify({ password: document.getElementById('pw').value }),
+      body: JSON.stringify({ username: document.getElementById('user').value, password: document.getElementById('pw').value }),
     });
     if (r.ok) { location.href = '/'; return; }
     const d = await r.json().catch(() => ({}));

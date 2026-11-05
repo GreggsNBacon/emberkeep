@@ -16,7 +16,25 @@ const state = {
   cmdHistoryPos: -1,
   editor: null,      // { path, name, original, text, format, mode, modified, model }
   configs: null,
+  me: null,          // the signed-in account: { username, isLocal, full, permissions, allServers, canAddServers }
 };
+
+// What the signed-in account may do on the open server. The server checks every action itself;
+// the page only hides what would be refused.
+const can = perm => !!(state.me?.full || state.detail?.can?.includes(perm));
+
+// ---------------- hiding IP addresses (screen sharing, streaming) ----------------
+// Masks addresses wherever they're shown; Copy buttons still copy the real address.
+let hideIps = localStorage.getItem('hb.hideIps') === '1';
+const IP_RE = /\b\d{1,3}(?:\.\d{1,3}){3}\b/g;
+const showIp = text => (hideIps ? String(text).replace(IP_RE, '•••.•••.•••.•••') : String(text));
+function setHideIps(on) {
+  hideIps = on;
+  localStorage.setItem('hb.hideIps', on ? '1' : '0');
+  document.body.classList.toggle('ips-hidden', on);
+  renderJoin();
+  toast(on ? 'IP addresses are hidden. Copy buttons still copy them.' : 'IP addresses are shown.');
+}
 
 // ---------------- helpers ----------------
 
@@ -57,6 +75,7 @@ async function api(method, url, body) {
 }
 
 function toast(msg, kind = '') {
+  if (typeof msg === 'string') msg = showIp(msg); // never flash a hidden address in a message
   const t = h('div', { class: `toast ${kind}` }, msg);
   $('#toasts').append(t);
   setTimeout(() => t.remove(), kind === 'bad' || kind === 'warn' ? 7000 : 3500);
@@ -175,6 +194,8 @@ const icons = {
   drive: '<svg width="16" height="16" viewBox="0 0 20 20" aria-hidden="true"><path fill="currentColor" d="M3 6a2 2 0 0 1 2-2h10a2 2 0 0 1 2 2v8a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2zm11 6.5a1 1 0 1 0 0 .01z"/></svg>',
   copy: '<svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="10" height="10" rx="2" fill="none" stroke="currentColor" stroke-width="1.8"/><path d="M13 4.5V4a1.5 1.5 0 0 0-1.5-1.5h-7A1.5 1.5 0 0 0 3 4v7a1.5 1.5 0 0 0 1.5 1.5H5" fill="none" stroke="currentColor" stroke-width="1.8"/></svg>',
   caret: '<svg width="12" height="12" viewBox="0 0 20 20" aria-hidden="true"><path d="M5 8l5 5 5-5" fill="none" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/></svg>',
+  eye: '<svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true"><path d="M1.5 10S4.5 4 10 4s8.5 6 8.5 6-3 6-8.5 6S1.5 10 1.5 10z" fill="none" stroke="currentColor" stroke-width="1.7"/><circle cx="10" cy="10" r="2.6" fill="currentColor"/></svg>',
+  eyeOff: '<svg width="14" height="14" viewBox="0 0 20 20" aria-hidden="true"><path d="M1.5 10S4.5 4 10 4s8.5 6 8.5 6-3 6-8.5 6S1.5 10 1.5 10z" fill="none" stroke="currentColor" stroke-width="1.7"/><path d="M3 17L17 3" stroke="currentColor" stroke-width="1.9" stroke-linecap="round"/></svg>',
 };
 
 // ---------------- clipboard & network addresses ----------------
@@ -251,15 +272,15 @@ async function addressMenuItems(format, pick) {
   const vpn = (network.local || []).filter(a => a.kind === 'vpn');
   if (lan.length) {
     items.push({ heading: 'Friends on your home network' });
-    for (const a of lan) items.push({ label: format(a.address), sub: a.adapter + (a.primary ? ' (main connection)' : ''), onClick: () => pick(a.address, 'local') });
+    for (const a of lan) items.push({ label: showIp(format(a.address)), sub: a.adapter + (a.primary ? ' (main connection)' : ''), onClick: () => pick(a.address, 'local') });
   }
   if (vpn.length) {
     items.push({ heading: 'Friends on your VPN' });
-    for (const a of vpn) items.push({ label: format(a.address), sub: a.adapter, onClick: () => pick(a.address, 'vpn') });
+    for (const a of vpn) items.push({ label: showIp(format(a.address)), sub: a.adapter, onClick: () => pick(a.address, 'vpn') });
   }
   items.push({ heading: 'Friends over the internet' });
   items.push(network.publicIp
-    ? { label: format(network.publicIp), sub: 'Public IP. Needs port forwarding on your router.', onClick: () => pick(network.publicIp, 'public') }
+    ? { label: showIp(format(network.publicIp)), sub: 'Public IP. Needs port forwarding on your router.', onClick: () => pick(network.publicIp, 'public') }
     : { label: 'Public IP unavailable', sub: 'Couldn\'t reach ipify.org to look it up.', disabled: true });
   return items;
 }
@@ -394,7 +415,7 @@ function drawPorts() {
     h('span', { class: 'ports-dot' }), PORT_LABELS[state] || state);
   value.append(pill);
   if (st.state === 'none') {
-    value.append(h('button', { class: 'link join-hint', type: 'button', onclick: () => setTab('settings') }, 'Set ports'));
+    if (can('settings')) value.append(h('button', { class: 'link join-hint', type: 'button', onclick: () => setTab('settings') }, 'Set ports'));
     return;
   }
   const wantOpen = !(st.state === 'open');
@@ -408,11 +429,11 @@ function drawPorts() {
     if (st.message) items.push({ label: 'Note', sub: st.message, disabled: true });
     items.push('sep', { heading: `Handled by ${st.backendLabel}` },
       { label: 'Check again', sub: 'Ask the router for the current state', onClick: () => renderPorts(true) });
-    if (st.backend === 'porthop') items.push({ label: 'Open PortHop', sub: 'See every forward and its settings', onClick: openPortHop });
-    items.push({ label: 'Change ports', sub: 'Settings → Router ports', onClick: () => setTab('settings') });
+    if (st.backend === 'porthop' && state.me?.full) items.push({ label: 'Open PortHop', sub: 'See every forward and its settings', onClick: openPortHop });
+    if (can('settings')) items.push({ label: 'Change ports', sub: 'Settings → Router ports', onClick: () => setTab('settings') });
     openMenu(more, items);
   };
-  value.append(act, more);
+  value.append(...(can('ports') ? [act] : []), more);
 }
 
 async function changePorts(open) {
@@ -476,7 +497,9 @@ async function renderJoin() {
     items.push('sep', { label: `Port ${j.port}`, sub: `${portSource(j, true)}. Change it under Settings → Join port.`, disabled: true });
     openMenu(more, items);
   };
-  value.append(h('span', { class: 'join-addr', title: `Port: ${portSource(j)}` }, addr), copyBtn, more);
+  const eye = h('button', { class: 'btn btn-tiny', type: 'button', 'aria-pressed': hideIps ? 'true' : 'false',
+    title: hideIps ? 'Show IP addresses' : 'Hide IP addresses (Copy still works)', html: hideIps ? icons.eyeOff : icons.eye, onclick: () => setHideIps(!hideIps) });
+  value.append(h('span', { class: 'join-addr', title: `Port: ${portSource(j)}` }, showIp(addr)), copyBtn, more, eye);
 }
 
 function renderHeader() {
@@ -505,6 +528,11 @@ function renderHeader() {
   $('#stopBtn').disabled = !(running || s.state === 'Starting');
   $('#restartBtn').disabled = !running;
   $('#killBtn').disabled = !(running || busy);
+  // Controls this account can't use are hidden (the server refuses them anyway).
+  for (const id of ['#startBtn', '#stopBtn', '#restartBtn']) $(id).hidden = !can('control');
+  $('#killBtn').hidden = !can('kill');
+  $('#clearLogBtn').hidden = !can('console');
+  applyTabAccess();
 
   // Notices: start errors, missing folders, game tips.
   const n = $('#headNotice');
@@ -522,7 +550,8 @@ function renderHeader() {
   const ch = s.commandChannel;
   let placeholder = 'Type a command and press Enter';
   let enabled = running || busy;
-  if (ch === 'None') { placeholder = `${g.name} doesn't accept console commands`; enabled = false; }
+  if (state.detail && !can('console')) { placeholder = 'Your account can\'t send console commands'; enabled = false; }
+  else if (ch === 'None') { placeholder = `${g.name} doesn't accept console commands`; enabled = false; }
   else if (!running && !busy) placeholder = 'Start the server to send commands';
   else if (ch === 'Stdin' && s.adopted) { placeholder = 'Restart the server from Hostbay to send commands'; enabled = false; }
   else if (ch === 'Rcon') placeholder = 'Type an RCON command and press Enter';
@@ -546,7 +575,20 @@ function renderQuickCommands() {
   renderHeader();
 }
 
+// Tabs this account can't use are hidden; if the open one is among them, fall back to the console.
+function tabAllowed(tab) {
+  if (!state.detail && !state.me?.full) return tab === 'console';
+  if (tab === 'configs') return can('configs');
+  if (tab === 'settings') return can('settings') || can('launch');
+  return true;
+}
+function applyTabAccess() {
+  $$('.tab[data-tab]').forEach(t => { t.hidden = !tabAllowed(t.dataset.tab); });
+  if (!tabAllowed(state.tab) && state.detail) setTab('console', true);
+}
+
 function setTab(tab, silent) {
+  if (!tabAllowed(tab)) tab = 'console';
   state.tab = tab;
   localStorage.setItem('hb.tab', tab);
   $$('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === tab ? 'true' : 'false'));
@@ -875,6 +917,7 @@ function fieldRow(f, originalValue) {
     control.addEventListener('input', () => commit(control.value));
   }
   if (kind !== 'bool' && kind !== 'long' && isIpField(f)) {
+    control.classList.add('ip-field'); // shown as dots while IP addresses are hidden
     // "Fill current IP": one click fills the likely address; the caret offers every other choice.
     const set = v => { control.value = v; commit(v); control.focus(); };
     // Fills the public IP. Fields where the server listens (bind addresses) can't use it behind a
@@ -1140,11 +1183,14 @@ const encodeXml = s => String(s).replace(/&/g, '&amp;').replace(/"/g, '&quot;').
 
 function renderSettings() {
   const d = state.detail;
-  if (!d) return;
+  if (!d || !d.config) return;
   const c = structuredClone(d.config);
   const g = game(c.gameId);
   const form = $('#settingsForm');
   form.replaceChildren();
+  // Launch settings decide what runs on the host PC; without that permission they're shown read-only or left out.
+  const launchOk = can('launch');
+  const readOnly = value => h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, value);
 
   const row = (label, control, help) => h('div', { class: 'set-row' }, h('label', {}, label), h('div', {}, control, help ? h('div', { class: 'help' }, help) : null));
   const text = (key, opts = {}) => {
@@ -1188,8 +1234,8 @@ function renderSettings() {
     h('h2', {}, 'General'),
     h('div', { class: 'set-rows' },
       row('Name', text('name')),
-      row('Game', gameSel, 'Sets where Hostbay looks for config and log files, and how it talks to the server.'),
-      row('Server folder', withBrowse(text('installDir', { mono: true }), { title: 'Choose the server folder' })),
+      launchOk ? row('Game', gameSel, 'Sets where Hostbay looks for config and log files, and how it talks to the server.') : row('Game', h('div', { style: { paddingTop: '7px' } }, g.name)),
+      launchOk ? row('Server folder', withBrowse(text('installDir', { mono: true }), { title: 'Choose the server folder' })) : row('Server folder', readOnly(c.installDir)),
       d.join?.code || d.join?.codeLabel ? null : row('Join port', text('joinPort', {
         type: 'number', mono: true,
         get: () => c.joinPort ?? '',
@@ -1221,11 +1267,24 @@ function renderSettings() {
       row('Open while running', h('div', { class: 'inline' }, h('span', { class: 'toggle' }, autoPorts, h('span')),
         h('span', { class: 'dim' }, 'Open these ports when the server starts and close them when it stops'))),
       ps ? row('Handled by', h('div', { class: 'inline' }, h('span', {}, ps.backendLabel),
-        ps.backend === 'porthop' ? h('button', { class: 'btn btn-small', type: 'button', onclick: openPortHop }, 'Open PortHop') : null)) : null,
+        ps.backend === 'porthop' && state.me?.full ? h('button', { class: 'btn btn-small', type: 'button', onclick: openPortHop }, 'Open PortHop') : null)) : null,
     )));
 
+  const restartRow = () => row('Restart after a crash', (() => {
+    const cb = h('input', { type: 'checkbox', ...(c.autoRestart ? { checked: true } : {}) });
+    cb.addEventListener('change', () => c.autoRestart = cb.checked);
+    return h('div', { class: 'inline' }, h('span', { class: 'toggle' }, cb, h('span')), h('span', { class: 'dim' }, 'Restart automatically if the server stops without being asked to'));
+  })());
+  if (!launchOk) {
+    form.append(h('section', { class: 'set-group' },
+      h('h2', {}, 'Launch'),
+      h('div', { class: 'notice', style: { margin: '0 0 12px' } }, 'The executable, launch arguments, folders and environment can only be changed by accounts with the "Change launch settings" permission, because they decide what runs on the host PC.'),
+      h('div', { class: 'set-rows' },
+        row('Executable', readOnly(d.resolvedExecutable || c.executable)),
+        restartRow())));
+  }
   const exeInput = text('executable', { mono: true });
-  form.append(h('section', { class: 'set-group' },
+  if (launchOk) form.append(h('section', { class: 'set-group' },
     h('h2', {}, 'Launch'),
     h('p', {}, g.id === 'valheim' ? g.notes : 'How Hostbay starts the server. Paths can be relative to the server folder.'),
     h('div', { class: 'set-rows' },
@@ -1243,11 +1302,7 @@ function renderSettings() {
         });
         return t;
       })()),
-      row('Restart after a crash', (() => {
-        const cb = h('input', { type: 'checkbox', ...(c.autoRestart ? { checked: true } : {}) });
-        cb.addEventListener('change', () => c.autoRestart = cb.checked);
-        return h('div', { class: 'inline' }, h('span', { class: 'toggle' }, cb, h('span')), h('span', { class: 'dim' }, 'Restart automatically if the server stops without being asked to'));
-      })()),
+      restartRow(),
     )));
 
   // Console & shutdown
@@ -1289,14 +1344,14 @@ function renderSettings() {
   const logs = h('textarea', { class: 'input mono', rows: 2, spellcheck: 'false', placeholder: 'logs\\server.log' });
   logs.value = (c.extraLogFiles || []).join('\n');
   logs.addEventListener('input', () => c.extraLogFiles = logs.value.split('\n').map(x => x.trim()).filter(Boolean));
-  form.append(h('section', { class: 'set-group' },
+  if (launchOk) form.append(h('section', { class: 'set-group' },
     h('h2', {}, 'Logs'),
     h('p', {}, 'Hostbay shows the server\'s console output and follows these log files live.'),
     h('div', { class: 'set-rows' },
       (g.logFiles || []).length ? row('Game log files', h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, g.logFiles.join(', '))) : null,
       row('Extra log files', logs, 'One path per line, relative to the server folder or absolute. * works as a wildcard.'))));
 
-  form.append(h('section', { class: 'set-group' },
+  if (launchOk) form.append(h('section', { class: 'set-group' },
     h('h2', {}, 'Remove'),
     h('div', { class: 'set-rows danger-zone' },
       row('Remove from Hostbay', h('button', { class: 'btn btn-danger', type: 'button', onclick: removeServer }, 'Remove server'),
@@ -1517,7 +1572,6 @@ async function appSettingsDialog() {
     body.replaceChildren();
     const remote = h('input', { type: 'checkbox', ...(st.remoteAccess ? { checked: true } : {}) });
     const port = h('input', { class: 'input mono', type: 'number', min: 1024, max: 65535, value: st.configuredPort });
-    const pw = h('input', { class: 'input', type: 'password', placeholder: st.hasPassword ? 'Enter a new password to change it' : 'At least 6 characters (10 for internet access)', autocomplete: 'new-password' });
     const tray = h('input', { type: 'checkbox', ...(st.minimizeToTray ? { checked: true } : {}) });
 
     // "Reach Hostbay from the internet": opens Hostbay's own port on the router with UPnP.
@@ -1525,7 +1579,7 @@ async function appSettingsDialog() {
     const internetGroup = () => {
       const inet = h('input', { type: 'checkbox', ...(st.internetAccess ? { checked: true } : {}) });
       const blocked = !st.listeningOnLan ? 'Turn on remote access and save first.'
-        : !st.longPassword ? `Set a password of at least ${st.minInternetPasswordLength} characters first.` : null;
+        : !st.longPassword ? `Every enabled account needs a password of at least ${st.minInternetPasswordLength} characters first.` : null;
       inet.disabled = !!blocked && !st.internetAccess;
       const status = h('div', { class: 'fwd-status' });
       const showStatus = f => {
@@ -1583,7 +1637,7 @@ async function appSettingsDialog() {
     };
 
     // This PC's addresses, each with a Copy button. Filled in once the public IP lookup returns.
-    const copyLine = (value, what) => h('div', { class: 'addr-line' }, h('code', {}, value),
+    const copyLine = (value, what) => h('div', { class: 'addr-line' }, h('code', {}, showIp(value)),
       h('button', { class: 'btn btn-small', type: 'button', onclick: () => copyText(value, `Copied ${what || value}`) }, h('span', { html: icons.copy }), 'Copy'));
     const addrRow = (title, sub, valueEl, help) => h('div', { class: 'set-row' },
       h('label', {}, title, sub ? h('span', { class: 'label-sub' }, sub) : null),
@@ -1608,16 +1662,14 @@ async function appSettingsDialog() {
         addrRows),
       h('div', { class: 'set-group' },
         h('h2', {}, 'Remote access'),
-        h('p', {}, 'Control your servers from another PC or your phone on the same network. Open the address below in a browser and sign in with the password.'),
+        h('p', {}, 'Control your servers from another PC or your phone on the same network. Open the address below in a browser and sign in with an account.'),
         h('div', { class: 'set-rows' },
-          h('div', { class: 'set-row' }, h('label', {}, 'Password'),
-            h('div', { class: 'with-btn' }, pw, h('button', { class: 'btn', type: 'button', onclick: async () => {
-              try { st = await api('POST', '/api/settings/password', { password: pw.value }); toast('Password saved.', 'good'); draw(); }
-              catch (e) { toast(e.message, 'bad'); }
-            } }, st.hasPassword ? 'Change' : 'Set password'))),
+          h('div', { class: 'set-row' }, h('label', {}, 'Accounts'),
+            h('div', { class: 'inline' }, h('span', { class: 'dim' }, st.hasAccounts ? 'People sign in with their own username and password.' : 'No accounts yet.'),
+              h('button', { class: 'btn btn-small', type: 'button', onclick: () => { m.close(); usersDialog(); } }, 'Users & groups'))),
           h('div', { class: 'set-row' }, h('label', {}, 'Allow remote access'),
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, remote, h('span')),
-              h('span', { class: 'dim' }, st.hasPassword ? (st.listeningOnLan ? 'On. Other devices can connect.' : 'Off. Only this PC can open Hostbay.') : 'Set a password first.'))),
+              h('span', { class: 'dim' }, st.hasAccounts ? (st.listeningOnLan ? 'On. Other devices can connect.' : 'Off. Only this PC can open Hostbay.') : 'Create an account first.'))),
           st.listeningOnLan ? h('div', { class: 'set-row' }, h('label', {}, 'Address'),
             h('div', { class: 'url-list' }, st.lanUrls.length ? st.lanUrls.map(u => copyLine(u, 'the link')) : h('span', { class: 'dim' }, 'No network connection found.'))) : null,
           h('div', { class: 'set-row' }, h('label', {}, 'Port'), h('div', {}, port,
@@ -1634,7 +1686,7 @@ async function appSettingsDialog() {
         )),
       h('p', { class: 'dim', style: { fontSize: '12.5px' } }, `Hostbay ${st.version || ''}`),
     );
-    remote.disabled = !st.hasPassword;
+    remote.disabled = !st.hasAccounts;
     save.onclick = async () => {
       try {
         const r = await api('PUT', '/api/settings', { remoteAccess: remote.checked, port: Number(port.value), minimizeToTray: tray.checked });
@@ -1650,6 +1702,161 @@ async function appSettingsDialog() {
   const save = h('button', { class: 'btn btn-primary', type: 'button' }, 'Save');
   const m = openModal({ title: 'App settings', body, foot: [isLocal ? null : h('a', { class: 'btn btn-ghost', href: '/auth/logout' }, 'Sign out'), h('span', { class: 'spacer' }), save] });
   draw();
+}
+
+// ---------------- your account ----------------
+
+function accountDialog() {
+  const me = state.me;
+  const cur = h('input', { class: 'input', type: 'password', autocomplete: 'current-password' });
+  const next = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
+  const again = h('input', { class: 'input', type: 'password', autocomplete: 'new-password' });
+  const save = h('button', { class: 'btn btn-primary', type: 'button' }, 'Change password');
+  save.onclick = async () => {
+    if (next.value !== again.value) { toast('The new passwords don\'t match.', 'bad'); return; }
+    save.disabled = true;
+    try {
+      await api('POST', '/api/me/password', { current: cur.value, next: next.value });
+      toast('Password changed. Your other devices have been signed out.', 'good');
+      m.close();
+    } catch (e) { toast(e.message, 'bad'); }
+    save.disabled = false;
+  };
+  const m = openModal({
+    title: `Your account: ${me.username}`, small: true,
+    body: h('div', { class: 'field-stack' },
+      h('p', {}, 'Changing your password signs you out on every other device.'),
+      h('label', {}, 'Current password', cur),
+      h('label', {}, 'New password', next),
+      h('label', {}, 'New password again', again),
+      h('div', { class: 'dim', style: { fontSize: '12.5px' } }, 'At least 8 characters. Use 10 or more if the host lets Hostbay be reached from the internet.')),
+    foot: [h('a', { class: 'btn btn-ghost', href: '/auth/logout' }, 'Sign out'), h('span', { class: 'spacer' }), save],
+  });
+}
+
+// ---------------- users & groups (full access) ----------------
+
+function passwordPrompt(title, help) {
+  return new Promise(resolve => {
+    let done = false;
+    const pw = h('input', { class: 'input', type: 'password', autocomplete: 'new-password', autofocus: true });
+    const finish = v => { if (!done) { done = true; resolve(v); m.close(); } };
+    const ok = h('button', { class: 'btn btn-primary', type: 'button', onclick: () => finish(pw.value) }, 'Save password');
+    pw.addEventListener('keydown', e => { if (e.key === 'Enter') finish(pw.value); });
+    const m = openModal({ title, small: true, body: h('div', { class: 'field-stack' }, h('p', {}, help), h('label', {}, 'New password', pw)),
+      foot: [h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => finish(null) }, 'Cancel'), ok],
+      onClose: () => { if (!done) { done = true; resolve(null); } } });
+  });
+}
+
+async function usersDialog(tab = 'users') {
+  let data;
+  try { data = await api('GET', '/api/accounts'); } catch (e) { toast(e.message, 'bad'); return; }
+  const body = h('div');
+  const tabs = h('div', { class: 'mtabs', role: 'tablist' });
+  const panel = h('div');
+  const show = t => {
+    tab = t;
+    $$('[data-t]', tabs).forEach(b => b.setAttribute('aria-selected', b.dataset.t === t ? 'true' : 'false'));
+    panel.replaceChildren(t === 'users' ? usersPanel() : groupsPanel());
+  };
+  tabs.append(
+    h('button', { class: 'tab', type: 'button', role: 'tab', 'data-t': 'users', onclick: () => show('users') }, 'Users'),
+    h('button', { class: 'tab', type: 'button', role: 'tab', 'data-t': 'groups', onclick: () => show('groups') }, 'Groups'));
+  body.append(tabs, panel);
+  const m = openModal({ title: 'Users & groups', body, wide: true });
+  m.modal.classList.add('wide');
+
+  const apply = async (method, url, payload, ok) => {
+    try { data = await api(method, url, payload); if (ok) toast(ok, 'good'); show(tab); return true; }
+    catch (e) { toast(e.message, 'bad'); return false; }
+  };
+  const groupName = id => data.groups.find(g => g.id === id)?.name || 'No group';
+  const groupSelect = (value, onchange) => {
+    const sel = h('select', { class: 'input select' }, data.groups.map(g => h('option', { value: g.id, ...(g.id === value ? { selected: true } : {}) }, g.name)));
+    if (onchange) sel.onchange = () => onchange(sel.value);
+    return sel;
+  };
+
+  function usersPanel() {
+    const name = h('input', { class: 'input', type: 'text', placeholder: 'Username', autocomplete: 'off', spellcheck: 'false' });
+    const pw = h('input', { class: 'input', type: 'password', placeholder: `Password (${data.minPasswordLength}+ characters)`, autocomplete: 'new-password' });
+    const grp = groupSelect(data.groups.find(g => !g.fullAccess)?.id || data.groups[0]?.id);
+    const add = h('button', { class: 'btn btn-primary', type: 'button' }, 'Add user');
+    add.onclick = () => apply('POST', '/api/accounts/users', { username: name.value, password: pw.value, groupId: grp.value }, `Added ${name.value}.`);
+    const list = h('div', { class: 'acct-list' });
+    if (!data.users.length) list.append(h('div', { class: 'file-note' }, 'No accounts yet. Add one above; remote sign-in needs at least one.'));
+    for (const u of data.users) {
+      const last = u.lastSignIn ? `Last signed in ${new Date(u.lastSignIn).toLocaleString()}` : 'Never signed in';
+      list.append(h('div', { class: `acct-row${u.disabled ? ' off' : ''}` },
+        h('div', { class: 'acct-name' }, h('strong', {}, u.username),
+          h('span', { class: 'dim' }, u.disabled ? 'Disabled' : last),
+          !u.longPassword ? h('span', { class: 'acct-flag', title: `Shorter than ${data.minInternetPasswordLength} characters: blocks internet access` }, 'Short password') : null),
+        groupSelect(u.groupId, gid => apply('PUT', `/api/accounts/users/${u.id}`, { groupId: gid }, `${u.username} is now in ${groupName(gid)}.`)),
+        h('div', { class: 'acct-actions' },
+          h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
+            const p = await passwordPrompt(`New password for ${u.username}`, 'They\'ll be signed out everywhere and need this password next time.');
+            if (p) apply('PUT', `/api/accounts/users/${u.id}`, { password: p }, `Password for ${u.username} changed.`);
+          } }, 'Reset password'),
+          h('button', { class: 'btn btn-small', type: 'button', onclick: () => apply('PUT', `/api/accounts/users/${u.id}`, { disabled: !u.disabled }, u.disabled ? `${u.username} can sign in again.` : `${u.username} is disabled and signed out.`) }, u.disabled ? 'Enable' : 'Disable'),
+          h('button', { class: 'btn btn-small btn-danger', type: 'button', onclick: async () => {
+            if (await confirmDialog(`Delete ${u.username}?`, 'They\'ll be signed out and won\'t be able to sign in again.', { okText: 'Delete', danger: true }))
+              apply('DELETE', `/api/accounts/users/${u.id}`, undefined, `Deleted ${u.username}.`);
+          } }, 'Delete'))));
+    }
+    return h('div', { class: 'field-stack' },
+      h('p', {}, 'Each person gets their own sign-in. Their group decides what they can do and which servers they see.'),
+      h('div', { class: 'acct-add' }, name, pw, grp, add),
+      list);
+  }
+
+  function groupsPanel() {
+    const wrap = h('div', { class: 'field-stack' },
+      h('p', {}, 'Groups decide what their members can do and which servers they see. Changes apply straight away, even to people who are signed in.'));
+    const card = g => {
+      const draft = structuredClone(g);
+      const nameIn = h('input', { class: 'input', type: 'text', value: draft.name, disabled: g.builtIn || null });
+      nameIn.oninput = () => draft.name = nameIn.value;
+      const full = h('input', { type: 'checkbox', ...(draft.fullAccess ? { checked: true } : {}), disabled: g.builtIn || null });
+      const perms = h('div', { class: 'perm-grid' });
+      const servers = h('div', { class: 'perm-servers' });
+      const drawInner = () => {
+        perms.replaceChildren(...data.permissions.map(p => {
+          const cb = h('input', { type: 'checkbox', ...(draft.fullAccess || draft.permissions.includes(p.id) ? { checked: true } : {}), disabled: draft.fullAccess || null });
+          cb.onchange = () => { draft.permissions = cb.checked ? [...draft.permissions, p.id] : draft.permissions.filter(x => x !== p.id); };
+          return h('label', { class: `perm${p.risky ? ' risky' : ''}`, title: p.help }, cb, h('span', {}, h('b', {}, p.label), h('small', {}, p.help)));
+        }));
+        const all = h('input', { type: 'checkbox', ...(draft.fullAccess || draft.allServers ? { checked: true } : {}), disabled: draft.fullAccess || null });
+        all.onchange = () => { draft.allServers = all.checked; drawInner(); };
+        servers.replaceChildren(h('label', { class: 'perm' }, all, h('span', {}, h('b', {}, 'All servers'), h('small', {}, 'Including ones added later'))),
+          ...(!draft.fullAccess && !draft.allServers ? data.servers.map(s => {
+            const cb = h('input', { type: 'checkbox', ...(draft.serverIds.includes(s.id) ? { checked: true } : {}) });
+            cb.onchange = () => { draft.serverIds = cb.checked ? [...draft.serverIds, s.id] : draft.serverIds.filter(x => x !== s.id); };
+            return h('label', { class: 'perm' }, cb, h('span', {}, h('b', {}, s.name), h('small', {}, game(s.gameId).name)));
+          }) : []));
+      };
+      full.onchange = () => { draft.fullAccess = full.checked; drawInner(); };
+      drawInner();
+      return h('div', { class: 'group-card' },
+        h('div', { class: 'group-head' }, nameIn,
+          h('label', { class: 'inline', title: 'Everything, including accounts, app settings and every server' }, h('span', { class: 'toggle' }, full, h('span')), h('span', {}, 'Full access')),
+          h('span', { class: 'dim' }, `${g.members || 0} member${g.members === 1 ? '' : 's'}`)),
+        g.builtIn ? h('p', { class: 'dim' }, 'The Owners group always has full access, so the host can never be locked out.') : null,
+        h('h4', {}, 'Can do'), perms,
+        h('h4', {}, 'Servers'), servers,
+        h('div', { class: 'row gap' }, h('span', { class: 'spacer' }),
+          !g.builtIn && g.id ? h('button', { class: 'btn btn-small btn-danger', type: 'button', onclick: async () => {
+            if (await confirmDialog(`Delete the ${g.name} group?`, 'Move its members to another group first.', { okText: 'Delete', danger: true }))
+              apply('DELETE', `/api/accounts/groups/${g.id}`, undefined, `Deleted ${g.name}.`);
+          } }, 'Delete group') : null,
+          h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => apply('POST', '/api/accounts/groups', draft, `Saved ${draft.name || 'the group'}.`) }, g.id ? 'Save group' : 'Create group')));
+    };
+    for (const g of data.groups) wrap.append(card(g));
+    wrap.append(h('button', { class: 'btn', type: 'button', onclick: () => wrap.insertBefore(card({ id: '', name: '', fullAccess: false, permissions: ['control'], allServers: true, serverIds: [], builtIn: false, members: 0 }), wrap.lastChild) }, 'New group'));
+    return wrap;
+  }
+
+  show(tab);
 }
 
 // ---------------- live server list ----------------
@@ -1746,12 +1953,33 @@ function wire() {
   window.addEventListener('beforeunload', e => { if (isDirty()) { e.preventDefault(); e.returnValue = ''; } });
 }
 
+// Shows who's signed in and only the app-wide buttons this account can use.
+function applyAccount() {
+  const me = state.me;
+  if (!me) return;
+  $('#addServerBtn').hidden = !me.canAddServers;
+  $('#emptyScanBtn').hidden = !me.canAddServers;
+  $('#emptyFolderBtn').hidden = !me.canAddServers;
+  if (!me.canAddServers) {
+    $('#emptyState h1').textContent = 'No servers here yet';
+    $('#emptyState p').textContent = 'The host hasn\'t shared any servers with your account yet.';
+  }
+  $('#appSettingsBtn').hidden = !me.full;
+  const who = $('#whoami');
+  who.replaceChildren(h('span', { class: 'who-dot' }), h('span', {}, me.isLocal ? 'On the host PC' : `Signed in as ${me.username}`));
+  who.onclick = me.isLocal ? appSettingsDialog : accountDialog;
+  who.title = me.isLocal ? 'App settings' : 'Your account: change your password or sign out';
+}
+
 async function init() {
   wire();
+  document.body.classList.toggle('ips-hidden', hideIps);
   try {
-    const [games, servers] = await Promise.all([api('GET', '/api/games'), api('GET', '/api/servers')]);
+    const [me, games, servers] = await Promise.all([api('GET', '/api/me'), api('GET', '/api/games'), api('GET', '/api/servers')]);
+    state.me = me;
     for (const g of games) state.games[g.id] = g;
     state.servers = servers;
+    applyAccount();
   } catch (e) { toast(e.message, 'bad'); }
   // Deep links: #server=<id>&tab=configs&dialog=add|settings
   const hash = new URLSearchParams(location.hash.slice(1));

@@ -43,7 +43,7 @@ public sealed class WebHost
 
     public async Task StartAsync()
     {
-        bool lan = _mgr.Settings.RemoteAccess && Auth.HasPassword;
+        bool lan = _mgr.Settings.RemoteAccess && Auth.HasAccounts;
         Exception? last = null;
         int basePort = _mgr.Settings.Port is > 0 and < 65536 ? _mgr.Settings.Port : 8765;
         for (int port = basePort; port < basePort + 20; port++)
@@ -87,7 +87,7 @@ public sealed class WebHost
     public void ApplyForwarding()
     {
         var s = _mgr.Settings;
-        bool want = s.InternetAccess && s.LongPassword && ListeningOnLan;
+        bool want = s.InternetAccess && Auth.AllPasswordsLong && ListeningOnLan;
         if (want) Forwarder.Open(Port);
         else if (Forwarder.Status.State != "off") _ = Forwarder.CloseAsync();
     }
@@ -132,7 +132,7 @@ public sealed class WebHost
         {
             if (loopback && Auth.CheckLocalToken(ctx.Request.Query["t"]))
             {
-                SetSessionCookie(ctx, Auth.CreateSession());
+                SetSessionCookie(ctx, Auth.CreateLocalSession());
                 string target = ctx.Request.Query["next"].ToString();
                 // Only same-site relative paths, never "//host" or absolute URLs.
                 ctx.Response.Redirect(target.StartsWith('/') && !target.StartsWith("//") && !target.Contains('\\') ? target : "/");
@@ -152,8 +152,8 @@ public sealed class WebHost
         if (path == "/auth/login" && HttpMethods.IsPost(ctx.Request.Method))
         {
             var body = await ctx.Request.ReadFromJsonAsync<LoginRequest>();
-            var (ok, err) = Auth.TryLogin(body?.Password ?? "", remote);
-            if (ok) { SetSessionCookie(ctx, Auth.CreateSession()); await ctx.Response.WriteAsJsonAsync(new { ok = true }); }
+            var (session, err) = Auth.Login(body?.Username ?? "", body?.Password ?? "", remote);
+            if (session != null) { SetSessionCookie(ctx, session); await ctx.Response.WriteAsJsonAsync(new { ok = true }); }
             else { ctx.Response.StatusCode = 401; await ctx.Response.WriteAsJsonAsync(new { error = err }); }
             return;
         }
@@ -171,16 +171,25 @@ public sealed class WebHost
             return;
         }
 
-        if (!Auth.IsValid(ctx.Request.Cookies[AuthService.CookieName]))
+        // Everything else (the app page, its script, all data) needs a signed-in account. The account and its
+        // rights are looked up again on every request, and endpoints check them before doing anything.
+        var principal = Auth.Resolve(ctx.Request.Cookies[AuthService.CookieName]);
+        if (principal == null)
         {
             if (path.StartsWith("/api/")) { ctx.Response.StatusCode = 401; return; }
             ctx.Response.Redirect("/login");
             return;
         }
+        ctx.Items[PrincipalKey] = principal;
         await next();
     }
 
-    private static void SetSessionCookie(HttpContext ctx, string session) =>
+    public const string PrincipalKey = "hb.principal";
+
+    /// <summary>The signed-in account for this request (set by the auth middleware).</summary>
+    public static Principal Who(HttpContext ctx) => (Principal)ctx.Items[PrincipalKey]!;
+
+    public static void SetSessionCookie(HttpContext ctx, string session) =>
         ctx.Response.Cookies.Append(AuthService.CookieName, session, new CookieOptions
         {
             HttpOnly = true,
@@ -189,7 +198,7 @@ public sealed class WebHost
             MaxAge = TimeSpan.FromDays(30),
         });
 
-    private sealed record LoginRequest(string? Password);
+    private sealed record LoginRequest(string? Username, string? Password);
 
     // ---------- static files (embedded) ----------
 
