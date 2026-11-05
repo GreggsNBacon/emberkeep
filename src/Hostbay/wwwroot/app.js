@@ -1895,6 +1895,10 @@ async function discordDialog() {
     try { d = await api(method, url, payload); if (ok) toast(ok, 'good'); draw(); return true; }
     catch (e) { toast(e.message, 'bad'); return false; }
   };
+  // Straight to this bot's Bot page (where Reset Token is) once we know the application, else the portal home.
+  const portalLink = (text = 'your bot\'s page in the Discord Developer Portal') => h('a', {
+    href: d.applicationId ? `https://discord.com/developers/applications/${d.applicationId}/bot` : 'https://discord.com/developers/applications',
+    target: '_blank', rel: 'noopener', class: 'ext-link' }, text);
   // While connecting, keep the status fresh.
   const poll = () => {
     clearTimeout(pollTimer);
@@ -1931,7 +1935,7 @@ async function discordDialog() {
       h('div', { class: 'set-rows' },
         h('div', { class: 'set-row' }, h('label', {}, 'Status'),
           h('div', {}, h('div', { class: 'inline' }, discordDot(d), h('span', {}, discordSummary(d))),
-            s.state === 'error' ? h('div', { class: 'help' }, 'Paste a new token below to fix it.') : null)),
+            s.state === 'error' ? h('div', { class: 'help' }, 'Get a new token from ', portalLink(), ' (Reset Token) and paste it below.') : null)),
         h('div', { class: 'set-row' }, h('label', {}, 'Running'),
           h('div', { class: 'inline' }, h('span', { class: 'toggle' }, enabled, h('span')), h('span', { class: 'dim' }, d.enabled ? 'The bot is online while Hostbay runs.' : 'Off. The bot shows as offline in Discord.'))),
         h('div', { class: 'set-row' }, h('label', {}, 'Discord servers'),
@@ -1942,7 +1946,9 @@ async function discordDialog() {
             h('div', { class: 'help' }, s.state === 'online' && s.guilds === 0
               ? 'The bot isn\'t in any Discord server yet. Use the button, pick your server and click Authorise. You need the Manage Server permission there.'
               : 'Opens Discord in your browser. Pick a server and click Authorise.'))),
-        s.state === 'error' ? h('div', { class: 'set-row' }, h('label', {}, 'New token'), setupGroup().querySelector('.discord-token')) : null,
+        h('div', { class: 'set-row' }, h('label', {}, s.state === 'error' ? 'New token' : 'Replace token'),
+          h('div', {}, setupGroup().querySelector('.discord-token'),
+            h('div', { class: 'help' }, 'Need a new token? Open ', portalLink(), ', click ', h('b', {}, 'Reset Token'), ', copy it and paste it here. Resetting stops the old token working straight away.'))),
         h('div', { class: 'set-row' }, h('label', {}, ''),
           h('div', {}, h('button', { class: 'btn btn-small btn-danger', type: 'button', onclick: async () => {
             if (await confirmDialog('Disconnect the bot?', 'Hostbay forgets the token and the bot goes offline. A status board already posted stays in Discord but stops updating.', { okText: 'Disconnect', danger: true }))

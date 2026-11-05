@@ -680,6 +680,7 @@ public static class Api
         {
             status = host.Discord.Status,
             hasToken = host.Discord.HasToken,
+            applicationId = d.ApplicationId,
             enabled = d.Enabled,
             inviteUrl = host.Discord.InviteUrl,
             board = new { channelId = d.BoardChannelId, channelName = d.BoardChannelName, posted = d.BoardMessageId.Length > 0 },
