@@ -4,6 +4,18 @@ A Windows app for running game servers for you and your friends. Run `Emberkeep.
 
 Emberkeep was called **Hostbay**, and Watchfire was called **PortHop**. Installing Emberkeep over Hostbay upgrades it in place: servers, accounts, settings, the Discord bot token and Watchfire's saved forwards all carry over. The data folders are moved to their new names on first start, and router forwards made under the old names are still recognised.
 
+## Download
+
+Get **Emberkeep-Setup.msi** from the [latest release](../../releases/latest) and run it. It installs for your Windows user only, so it doesn't ask for admin rights. Watchfire, which opens your router's ports for friends outside your home, is included: untick it on the "Choose what to install" page if you don't want it.
+
+1. Download `Emberkeep-Setup.msi` from the release's **Assets** list.
+2. Run it. Windows may show a SmartScreen warning because the installer isn't code-signed: choose **More info → Run anyway**.
+3. Open Emberkeep from the Start menu or the desktop shortcut. It finds servers installed through Steam on its own; add any others with **Add server**.
+
+To update, download the newest release and run it: it upgrades in place and keeps your servers and settings. This also works over an old Hostbay install.
+
+Just want the port forwarding? Watchfire has its own download in the [Watchfire repo](https://github.com/GreggsNBacon/watchfire/releases/latest).
+
 ## What it does
 
 - **Finds your servers.** It scans every Steam library, including dedicated servers installed from Steam's Tools library. You can also add any folder, such as a Minecraft server, and Emberkeep recognises the game from the files inside.
@@ -44,9 +56,9 @@ The window uses the Microsoft Edge WebView2 Runtime, which is built into Windows
 
 ## Installer
 
-`Emberkeep-Setup.msi` installs Emberkeep for the current Windows user, into `%LOCALAPPDATA%\Programs\Emberkeep`, so no admin prompt appears. A "Choose what to install" page has a tickbox for Emberkeep and one for Watchfire (installed to `%LOCALAPPDATA%ProgramsWatchfire`), so you can install either on its own or both. On an upgrade, the ticks start out matching what's already installed. Emberkeep gets Start menu and desktop shortcuts, Watchfire a Start menu shortcut, and the last page offers to launch whichever app you installed. Uninstall it from Settings > Apps. Uninstalling keeps your server list and settings in `%APPDATA%\Emberkeep`.
+`Emberkeep-Setup.msi` installs Emberkeep for the current Windows user, into `%LOCALAPPDATA%\Programs\Emberkeep`, so no admin prompt appears. A "Choose what to install" page has a tickbox for Emberkeep and one for Watchfire (installed to `%LOCALAPPDATA%\Programs\Watchfire`), so you can install either on its own or both. On an upgrade, the ticks start out matching what's already installed. Emberkeep gets Start menu and desktop shortcuts, Watchfire a Start menu shortcut, and the last page offers to launch whichever app you installed. Uninstall it from Settings > Apps. Uninstalling keeps your server list and settings in `%APPDATA%\Emberkeep`.
 
-To release a new version, bump `<Version>` in `src\Emberkeep\Emberkeep.csproj` and run `.\build.ps1`. The installer takes its version from the exe and upgrades older installs in place.
+To release a new version, commit and run `.\build.ps1`. The version is `0.3.<commit count>`, worked out by `build.ps1`. The installer takes its version from the exe and upgrades older installs in place.
 
 Silent install, for example for scripting: `msiexec /i Emberkeep-Setup.msi /qn` (installs both; add `ADDLOCAL=Emberkeep` or `ADDLOCAL=Watchfire` for just one, and `INSTALLDESKTOPSHORTCUT=0` to skip the desktop shortcut).
 
