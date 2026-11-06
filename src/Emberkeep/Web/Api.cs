@@ -618,6 +618,17 @@ public static partial class Api
             if (req.ServerIds is { } ids) d.ServerIds = ids.Where(id => mgr.Get(id) != null).Distinct().ToList();
             if (req.ShowOffline is bool off) d.ShowOffline = off;
             if (req.PrivateReplies is bool pr) d.PrivateReplies = pr;
+            if (req.Updates is { } u)
+            {
+                bool Id(string? v) => string.IsNullOrEmpty(v) || v.All(char.IsDigit);
+                if (!Id(u.ChannelId) || !Id(u.PingRoleId)) return Error("Pick the channel and role from the lists.");
+                d.Updates = new DiscordUpdates
+                {
+                    ChannelId = u.ChannelId ?? "", ChannelName = u.ChannelName ?? "",
+                    PingRoleId = u.PingRoleId ?? "", PingRoleName = u.PingRoleName ?? "",
+                    Crashes = u.Crashes, AddressChanges = u.AddressChanges, GameUpdates = u.GameUpdates, Restarts = u.Restarts, StartStop = u.StartStop,
+                };
+            }
             if (req.Enabled is bool en && en != d.Enabled)
             {
                 d.Enabled = en;
@@ -658,6 +669,22 @@ public static partial class Api
             catch (System.Net.Http.HttpRequestException) { return Error("Couldn't reach Discord."); }
             return Results.Ok(DiscordDto(mgr, host));
         }).Full();
+
+        // Posts a hello in the updates channel, to check the bot may post (and ping) there.
+        api.MapPost("/discord/updates/test", async () =>
+        {
+            try
+            {
+                await host.Discord.PostUpdateAsync("👋 Emberkeep will post server news here: crashes, address changes, updates and restarts.", 0x5865F2,
+                    ping: mgr.Settings.Discord.Updates.PingRoleId.Length > 0);
+            }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+            catch (DiscordException) { return Error(host.Discord.Status.UpdatesError ?? "Discord didn't accept it."); }
+            catch (Exception ex) when (ex is System.Net.Http.HttpRequestException or TaskCanceledException) { return Error("Couldn't reach Discord."); }
+            return Results.Ok(DiscordDto(mgr, host));
+        }).Full();
+
+        api.MapPost("/discord/retry", () => { host.Discord.RetryNow(); return Results.Ok(DiscordDto(mgr, host)); }).Full();
 
         api.MapDelete("/discord/board", async () =>
         {
@@ -913,11 +940,14 @@ public static partial class Api
             addressHost = d.AddressHost,
             showOffline = d.ShowOffline,
             privateReplies = d.PrivateReplies,
+            updates = d.Updates,
+            history = host.Discord.History,
             servers = mgr.Settings.Servers.Select(s => new { s.Id, s.Name, s.GameId }),
         };
     }
 
-    private sealed record DiscordRequest(bool? Enabled, bool? AllServers, List<string>? ServerIds, string? AddressHost, bool? ShowOffline, bool? PrivateReplies);
+    private sealed record DiscordRequest(bool? Enabled, bool? AllServers, List<string>? ServerIds, string? AddressHost, bool? ShowOffline, bool? PrivateReplies, DiscordUpdatesRequest? Updates);
+    private sealed record DiscordUpdatesRequest(string? ChannelId, string? ChannelName, string? PingRoleId, string? PingRoleName, bool Crashes, bool AddressChanges, bool GameUpdates, bool Restarts, bool StartStop);
     private sealed record DiscordTokenRequest(string? Token);
     private sealed record DiscordBoardRequest(string? ChannelId, string? ChannelName);
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);

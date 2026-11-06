@@ -20,6 +20,9 @@ public sealed class Scheduler
     private readonly HashSet<string> _running = new();
     private int _started;
 
+    /// <summary>A restart, stop or update is coming up: (server, task, minutes left). Raised at 10, 5 and 1 minute.</summary>
+    public event Action<ServerRuntime, ScheduledTask, int>? Warning;
+
     public Scheduler(ServerManager mgr, BackupService backups, ServerInstaller installer)
     {
         _mgr = mgr; _backups = backups; _installer = installer;
@@ -83,8 +86,9 @@ public sealed class Scheduler
 
     private bool Claim(string key) { lock (_running) return _running.Add(key); }
 
-    private static void Warn(ServerRuntime rt, ScheduledTask t, int minutes)
+    private void Warn(ServerRuntime rt, ScheduledTask t, int minutes)
     {
+        try { Warning?.Invoke(rt, t, minutes); } catch { }
         var what = t.Action == "stop" ? "shutting down" : "restarting";
         var cmd = GameExtras.BroadcastCommand(rt.Config.GameId, $"Server {what} in {minutes} minute{(minutes == 1 ? "" : "s")}");
         if (cmd == null) return;

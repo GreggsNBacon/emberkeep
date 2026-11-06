@@ -35,6 +35,8 @@ public sealed class WebHost
         Backups = new BackupService(mgr);
         Scheduler = new Scheduler(mgr, Backups, Installer);
         Notifier = new Notifier(mgr);
+        Addresses = new PublicAddressWatcher(mgr);
+        Scheduler.Warning += Discord.OnScheduledWarning;
     }
 
     /// <summary>Server backups (Backups tab).</summary>
@@ -43,6 +45,8 @@ public sealed class WebHost
     public Scheduler Scheduler { get; }
     /// <summary>Windows and Discord notifications about activity.</summary>
     public Notifier Notifier { get; }
+    /// <summary>Notices when the public IP changes.</summary>
+    public PublicAddressWatcher Addresses { get; }
 
     /// <summary>Installs and updates servers with SteamCMD.</summary>
     public ServerInstaller Installer { get; }
@@ -96,6 +100,7 @@ public sealed class WebHost
                 Updates.Start();
                 PcRestart.Start();
                 Scheduler.Start();
+                Addresses.Start();
                 StartPlayerPolling();
                 _ = Task.Run(() => ArtCache.AutoDetectAsync(_mgr)); // once per run: art for custom servers that have none
                 return;

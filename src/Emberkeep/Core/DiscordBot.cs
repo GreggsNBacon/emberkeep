@@ -5,6 +5,7 @@ using System.IO;
 using System.Linq;
 using System.Net;
 using System.Net.Http;
+using System.Net.NetworkInformation;
 using System.Net.Http.Headers;
 using System.Net.WebSockets;
 using System.Security.Cryptography;
@@ -35,10 +36,29 @@ public sealed class DiscordSettings
     public bool ShowOffline { get; set; } = true;
     /// <summary>Command and button replies are only visible to the person who asked.</summary>
     public bool PrivateReplies { get; set; } = true;
+    /// <summary>The channel the bot posts news in: crashes, address changes, updates, restarts.</summary>
+    public DiscordUpdates Updates { get; set; } = new();
 }
 
+/// <summary>What the bot posts in the updates channel, and who it pings.</summary>
+public sealed class DiscordUpdates
+{
+    public string ChannelId { get; set; } = "";
+    public string ChannelName { get; set; } = "";
+    /// <summary>A role to mention for crashes and address changes (people get a notification). Empty: no ping.</summary>
+    public string PingRoleId { get; set; } = "";
+    public string PingRoleName { get; set; } = "";
+    public bool Crashes { get; set; } = true;
+    public bool AddressChanges { get; set; } = true;
+    public bool GameUpdates { get; set; } = true;
+    public bool Restarts { get; set; } = true;
+    public bool StartStop { get; set; }
+}
+
+public sealed record DiscordLogLine(DateTime Time, string Text, bool Problem);
+
 /// <summary>What the bot is doing, for the UI.</summary>
-public sealed record DiscordStatus(string State, string Message, string? BotName, int Guilds, string? BoardError);
+public sealed record DiscordStatus(string State, string Message, string? BotName, int Guilds, string? BoardError, string? UpdatesError);
 
 public sealed class DiscordException(int status, string message, int code = 0) : Exception(message)
 {
@@ -79,6 +99,18 @@ public sealed class DiscordBot : IDisposable
     private string? _boardError;
     private int _boardPending;
     private volatile bool _sessionReady;
+    private string? _updatesError;
+    // Resuming: after a short drop Discord replays what was missed, without a full reconnect.
+    private string? _sessionId, _resumeUrl, _gatewayUrl;
+    private long? _seq;
+    private volatile bool _acked = true;
+    private CancellationTokenSource? _wake;
+    private DateTime _lastWake;
+    private readonly List<DiscordLogLine> _history = new();
+    private readonly SemaphoreSlim _postLock = new(1, 1);
+    private readonly ConcurrentDictionary<string, DateTime> _crashPosted = new();
+    private readonly ConcurrentDictionary<string, byte> _awaitingBack = new();
+    private readonly ConcurrentDictionary<string, DateTime> _warnPosted = new();
 
     public DiscordBot(ServerManager mgr)
     {
@@ -86,13 +118,55 @@ public sealed class DiscordBot : IDisposable
         _mgr.Changed += () => QueueBoardUpdate();
         // Catch changes that don't raise events: the public IP, ports edited in config files.
         _boardTimer = new Timer(_ => QueueBoardUpdate(), null, TimeSpan.FromMinutes(5), TimeSpan.FromMinutes(5));
+        _mgr.Activity.Added += OnActivity;
+        // Reconnect straight away when the network comes back or the PC wakes, instead of waiting for the next retry.
+        NetworkChange.NetworkAvailabilityChanged += (_, e) => { if (e.IsAvailable) NetworkBack("The network came back."); };
+        NetworkChange.NetworkAddressChanged += (_, _) => NetworkBack("The network changed.");
+        try { Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) NetworkBack("The PC woke up."); }; } catch { }
+    }
+
+    /// <summary>The last connection events, newest first, so a flaky connection can be understood.</summary>
+    public IReadOnlyList<DiscordLogLine> History { get { lock (_history) return _history.AsEnumerable().Reverse().ToList(); } }
+
+    private void Log(string text, bool problem = false)
+    {
+        lock (_history)
+        {
+            if (_history.Count > 0 && _history[^1].Text == text && DateTime.UtcNow - _history[^1].Time < TimeSpan.FromMinutes(5)) return;
+            _history.Add(new DiscordLogLine(DateTime.UtcNow, text, problem));
+            if (_history.Count > 25) _history.RemoveAt(0);
+        }
+    }
+
+    /// <summary>"Retry now": skips the wait before the next connection attempt.</summary>
+    public void RetryNow()
+    {
+        if (_loop is not { IsCompleted: false }) { Start(); return; }
+        if (_state != "online") { Log("Retrying now."); _wake?.Cancel(); }
+    }
+
+    private void NetworkBack(string why)
+    {
+        if (_token == null || _loop is not { IsCompleted: false }) return;
+        lock (_history) { if (DateTime.UtcNow - _lastWake < TimeSpan.FromSeconds(5)) return; _lastWake = DateTime.UtcNow; }
+        if (_state != "online") { Log($"{why} Reconnecting now."); _wake?.Cancel(); return; }
+        // Online as far as we know, but the connection may have died quietly: check with a heartbeat.
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(2000); // let the network settle
+            if (_ws is not { State: WebSocketState.Open } ws) return;
+            _acked = false;
+            try { await SendAsync(ws, new { op = 1, d = _seq }); } catch { }
+            await Task.Delay(8000);
+            if (!_acked && _ws == ws) { Log($"{why} The connection stopped answering, so reconnecting.", true); ws.Abort(); }
+        });
     }
 
     private DiscordSettings S => _mgr.Settings.Discord;
 
     public bool HasToken => S.TokenProtected.Length > 0;
 
-    public DiscordStatus Status => new(_state, _message, S.BotName.Length > 0 ? S.BotName : null, _guilds.Count, _boardError);
+    public DiscordStatus Status => new(_state, _message, S.BotName.Length > 0 ? S.BotName : null, _guilds.Count, _boardError, _updatesError);
 
     public string? InviteUrl => S.ApplicationId.Length > 0
         ? $"https://discord.com/oauth2/authorize?client_id={S.ApplicationId}&scope=bot%20applications.commands&permissions={InvitePermissions}"
@@ -157,6 +231,7 @@ public sealed class DiscordBot : IDisposable
     {
         await StopAsync();
         S.TokenProtected = ""; S.ApplicationId = ""; S.BotName = ""; S.BoardMessageId = "";
+        _sessionId = null; _resumeUrl = null; _seq = null;
         _mgr.Save();
         _token = null;
         SetState("off", "Not set up.");
@@ -179,43 +254,84 @@ public sealed class DiscordBot : IDisposable
         int backoff = 1;
         while (!ct.IsCancellationRequested)
         {
-            SetState("connecting", "Connecting to Discord…");
+            if (_state != "online") SetState("connecting", "Connecting to Discord…");
             try
             {
                 await ConnectOnceAsync(ct);
                 backoff = 1;
+                Log("Discord asked the bot to reconnect.");
             }
             catch (OperationCanceledException) when (ct.IsCancellationRequested) { return; }
             catch (DiscordException ex) when (ex.Status == 401 || ex.Code is 4004 or 4010 or 4011 or 4012 or 4013 or 4014)
             {
-                SetState("error", ex.Code == 4004 || ex.Status == 401
+                var msg = ex.Code == 4004 || ex.Status == 401
                     ? "Discord rejected the bot token. It may have been reset: paste the new one."
-                    : $"Discord closed the connection: {ex.Message}");
+                    : $"Discord closed the connection: {ex.Message}";
+                SetState("error", msg);
+                Log(msg, true);
                 return;
             }
             catch (Exception ex)
             {
+                if (ex is DiscordException { Code: 4007 or 4009 }) ForgetSession(); // the session can't be resumed: start a new one
                 if (_sessionReady) backoff = 1; // it was working: this is a one-off drop, not a failing connection
-                SetState("connecting", $"Lost the connection to Discord ({ex.Message}). Retrying in {backoff}s…");
+                var why = ex is HttpRequestException or WebSocketException ? Plain(ex) : ex.Message;
+                SetState("connecting", $"Lost the connection to Discord ({why}). Retrying in {backoff}s…");
+                Log($"Connection lost: {why}.", true);
             }
-            _guilds.Clear();
-            try { await Task.Delay(TimeSpan.FromSeconds(backoff), ct); } catch { return; }
-            backoff = Math.Min(backoff * 2, 60);
+            if (_state != "online") _guilds.Clear();
+            using (var wake = CancellationTokenSource.CreateLinkedTokenSource(ct))
+            {
+                _wake = wake;
+                try { await Task.Delay(TimeSpan.FromSeconds(backoff), wake.Token); }
+                catch { if (ct.IsCancellationRequested) return; backoff = 1; } // woken early: the network is back
+                finally { _wake = null; }
+            }
+            backoff = Math.Min(backoff * 2, 30);
+            if (_state == "online") SetState("connecting", "Reconnecting to Discord…");
         }
+    }
+
+    private void ForgetSession() { _sessionId = null; _resumeUrl = null; _seq = null; }
+
+    /// <summary>Network errors in words people know, instead of socket jargon.</summary>
+    private static string Plain(Exception ex)
+    {
+        var m = (ex.InnerException ?? ex).Message;
+        if (m.Contains("No such host", StringComparison.OrdinalIgnoreCase) || m.Contains("name", StringComparison.OrdinalIgnoreCase) && m.Contains("resolve", StringComparison.OrdinalIgnoreCase))
+            return "no internet connection, or Discord can't be found";
+        if (m.Contains("timed out", StringComparison.OrdinalIgnoreCase) || ex is TaskCanceledException) return "Discord didn't answer in time";
+        if (m.Contains("refused", StringComparison.OrdinalIgnoreCase)) return "the connection was refused";
+        if (m.Contains("without completing the close handshake", StringComparison.OrdinalIgnoreCase) || m.Contains("forcibly closed", StringComparison.OrdinalIgnoreCase)
+            || m.Contains("aborted", StringComparison.OrdinalIgnoreCase)) return "the connection dropped";
+        return m.TrimEnd('.');
+    }
+
+    private async Task<string> GatewayUrlAsync()
+    {
+        if (_gatewayUrl != null) return _gatewayUrl;
+        var gw = await RestAsync(HttpMethod.Get, "/gateway/bot", null);
+        return _gatewayUrl = gw.GetProperty("url").GetString() ?? "wss://gateway.discord.gg";
     }
 
     private async Task ConnectOnceAsync(CancellationToken ct)
     {
         _sessionReady = false;
-        var gw = await RestAsync(HttpMethod.Get, "/gateway/bot", null);
-        var url = gw.GetProperty("url").GetString() + "/?v=10&encoding=json";
+        bool resume = _sessionId != null && _resumeUrl != null && _seq != null;
+        var url = (resume ? _resumeUrl! : await GatewayUrlAsync()) + "/?v=10&encoding=json";
         using var ws = new ClientWebSocket();
+        ws.Options.KeepAliveInterval = TimeSpan.FromSeconds(20);
         _ws = ws;
-        await ws.ConnectAsync(new Uri(url), ct);
+        using (var connectTimeout = CancellationTokenSource.CreateLinkedTokenSource(ct))
+        {
+            connectTimeout.CancelAfter(TimeSpan.FromSeconds(20));
+            try { await ws.ConnectAsync(new Uri(url), connectTimeout.Token); }
+            catch (OperationCanceledException) when (!ct.IsCancellationRequested) { throw new TimeoutException("Discord didn't answer in time"); }
+            catch when (!resume) { _gatewayUrl = null; throw; } // ask for the address again next time
+        }
 
         using var hb = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        long? seq = null;
-        bool acked = true;
+        _acked = true;
         try
         {
             while (true)
@@ -228,7 +344,7 @@ public sealed class DiscordBot : IDisposable
                 }
                 var root = doc.RootElement;
                 int op = root.GetProperty("op").GetInt32();
-                if (root.TryGetProperty("s", out var s) && s.ValueKind == JsonValueKind.Number) seq = s.GetInt64();
+                if (root.TryGetProperty("s", out var s) && s.ValueKind == JsonValueKind.Number) _seq = s.GetInt64();
                 switch (op)
                 {
                     case 10: // hello: start heartbeating, then identify
@@ -241,14 +357,19 @@ public sealed class DiscordBot : IDisposable
                                 await Task.Delay((int)(interval * Random.Shared.NextDouble()), hb.Token);
                                 while (!hb.Token.IsCancellationRequested)
                                 {
-                                    if (!acked) { ws.Abort(); return; } // zombie connection: drop it and reconnect
-                                    acked = false;
-                                    await SendAsync(ws, new { op = 1, d = seq });
+                                    if (!_acked) { Log("Discord stopped answering heartbeats.", true); ws.Abort(); return; } // zombie connection: drop it and reconnect
+                                    _acked = false;
+                                    await SendAsync(ws, new { op = 1, d = _seq });
                                     await Task.Delay(interval, hb.Token);
                                 }
                             }
                             catch { }
                         });
+                        if (resume)
+                        {
+                            await SendAsync(ws, new { op = 6, d = new { token = _token, session_id = _sessionId, seq = _seq } });
+                            break;
+                        }
                         await SendAsync(ws, new
                         {
                             op = 2,
@@ -262,10 +383,14 @@ public sealed class DiscordBot : IDisposable
                         });
                         break;
                     }
-                    case 11: acked = true; break;
-                    case 1: await SendAsync(ws, new { op = 1, d = seq }); break;
-                    case 7: return; // asked to reconnect
-                    case 9: await Task.Delay(Random.Shared.Next(1000, 5000), ct); return; // invalid session: identify again
+                    case 11: _acked = true; break;
+                    case 1: await SendAsync(ws, new { op = 1, d = _seq }); break;
+                    case 7: return; // asked to reconnect (and resume)
+                    case 9: // invalid session: resumable only if d is true
+                        if (!(root.TryGetProperty("d", out var rd) && rd.ValueKind == JsonValueKind.True)) ForgetSession();
+                        Log("Discord ended the session; starting a new one.");
+                        await Task.Delay(Random.Shared.Next(1000, 5000), ct);
+                        return;
                     case 0: OnDispatch(root.GetProperty("t").GetString(), root.GetProperty("d").Clone()); break;
                 }
             }
@@ -305,12 +430,21 @@ public sealed class DiscordBot : IDisposable
         {
             case "READY":
                 _sessionReady = true;
+                _sessionId = d.TryGetProperty("session_id", out var sid) ? sid.GetString() : null;
+                _resumeUrl = d.TryGetProperty("resume_gateway_url", out var ru) ? ru.GetString() : null;
+                Log("Connected.");
                 _guilds.Clear();
                 foreach (var g in d.GetProperty("guilds").EnumerateArray()) _guilds[g.GetProperty("id").GetString()!] = 0;
                 if (d.TryGetProperty("user", out var u) && u.GetProperty("username").GetString() is { } name && name != S.BotName) { S.BotName = name; _mgr.Save(); }
                 SetState("online", "Online.");
                 _lastPresence = "";
                 _ = Task.Run(RegisterCommandsAsync);
+                QueueBoardUpdate(force: true);
+                break;
+            case "RESUMED":
+                _sessionReady = true;
+                SetState("online", "Online.");
+                Log("Reconnected (picked up where it left off).");
                 QueueBoardUpdate(force: true);
                 break;
             case "GUILD_CREATE":
@@ -376,7 +510,7 @@ public sealed class DiscordBot : IDisposable
             else if (type == 2)
             {
                 string name = data.GetProperty("name").GetString() ?? "";
-                if (name == "servers") response = Reply(await BoardPayloadAsync(withButtons: false));
+                if (name == "servers") response = Reply(await BoardPayloadAsync());
                 else if (name == "ip")
                 {
                     var wanted = Option(data, "server");
@@ -457,22 +591,19 @@ public sealed class DiscordBot : IDisposable
         };
     }
 
-    private async Task<object> BoardPayloadAsync(bool withButtons)
+    /// <summary>The board: one card per server, no buttons (an empty list removes buttons from older boards).</summary>
+    private async Task<object> BoardPayloadAsync()
     {
         var host = await HostAsync();
         var shown = Shown().ToList();
         var embeds = shown.Take(10).Select(r => Embed(r, host)).ToList();
         if (embeds.Count == 0)
             embeds.Add(new { title = "Game servers", description = S.ShowOffline ? "No servers are shared yet." : "No servers are online right now.", color = 0x747F8D });
-        object? components = withButtons && shown.Count > 0
-            ? shown.Take(10).Select(r => new { type = 2, style = 2, label = Trim(r.Config.Name, 60), emoji = new { name = "📋" }, custom_id = "hb:ip:" + r.Config.Id })
-                .Chunk(5).Select(row => new { type = 1, components = row }).ToArray()
-            : null;
         return new
         {
             content = shown.Count > 10 ? $"Showing 10 of {shown.Count} servers. Use `/ip` for the rest." : "",
             embeds,
-            components = components ?? (withButtons ? Array.Empty<object>() : null),
+            components = Array.Empty<object>(),
         };
     }
 
@@ -509,7 +640,17 @@ public sealed class DiscordBot : IDisposable
                     channels.Add(new { id = c.GetProperty("id").GetString(), name = c.GetProperty("name").GetString() });
             }
             catch { }
-            result.Add(new { id = gid, name = g.GetProperty("name").GetString(), channels });
+            var roles = new List<object>();
+            try
+            {
+                var list = await RestAsync(HttpMethod.Get, $"/guilds/{gid}/roles", null);
+                foreach (var r in list.EnumerateArray()
+                             .Where(r => r.GetProperty("id").GetString() != gid && !(r.TryGetProperty("managed", out var mg) && mg.GetBoolean()))
+                             .OrderByDescending(r => r.TryGetProperty("position", out var p) ? p.GetInt32() : 0))
+                    roles.Add(new { id = r.GetProperty("id").GetString(), name = r.GetProperty("name").GetString(), mentionable = r.TryGetProperty("mentionable", out var mn) && mn.GetBoolean() });
+            }
+            catch { }
+            result.Add(new { id = gid, name = g.GetProperty("name").GetString(), channels, roles });
         }
         return result;
     }
@@ -525,7 +666,7 @@ public sealed class DiscordBot : IDisposable
             {
                 try { await RestAsync(HttpMethod.Delete, $"/channels/{S.BoardChannelId}/messages/{S.BoardMessageId}", null); } catch { }
             }
-            var payload = await BoardPayloadAsync(withButtons: true);
+            var payload = await BoardPayloadAsync();
             JsonElement msg;
             try { msg = await RestAsync(HttpMethod.Post, $"/channels/{channelId}/messages", payload); }
             catch (DiscordException ex) { throw new InvalidOperationException(BoardProblem(ex)); }
@@ -557,6 +698,103 @@ public sealed class DiscordBot : IDisposable
         finally { _boardLock.Release(); }
     }
 
+    // ---------------- updates channel ----------------
+
+    private DiscordUpdates U => S.Updates;
+    private bool Shared(string? serverId) => serverId != null && (S.AllServers || S.ServerIds.Contains(serverId));
+
+    private void OnActivity(ActivityEntry e)
+    {
+        if (_token == null || !S.Enabled || U.ChannelId.Length == 0) return;
+        if (e.Kind == "network") { if (U.AddressChanges && S.AddressHost.Trim().Length == 0) _ = Task.Run(PostAddressChangeAsync); return; }
+        if (!Shared(e.ServerId) || _mgr.Get(e.ServerId!) is not { } rt) return;
+        string name = $"**{rt.Config.Name}**";
+        switch (e.Kind)
+        {
+            case "crash" when U.Crashes:
+                // A server that crashes again soon after gets one message, not one per crash.
+                if (_crashPosted.TryGetValue(rt.Config.Id, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(10)) return;
+                _crashPosted[rt.Config.Id] = DateTime.UtcNow;
+                _awaitingBack[rt.Config.Id] = 0;
+                Post($"🔴 {name} crashed." + (rt.Config.AutoRestart ? " It's restarting by itself." : " It'll be back once the host restarts it."), 0xED4245, ping: true);
+                break;
+            case "crashloop" when U.Crashes:
+                _awaitingBack.TryRemove(rt.Config.Id, out _);
+                Post($"🔴 {name} keeps crashing, so it won't restart by itself. It'll be back once the host fixes it.", 0xED4245, ping: true);
+                break;
+            case "start":
+                if (_awaitingBack.TryRemove(rt.Config.Id, out _) && U.Crashes) Post($"🟢 {name} is back online.", 0x3BA55D, server: rt);
+                else if (U.StartStop && e.Who != "schedule") Post($"🟢 {name} is online.", 0x3BA55D, server: rt);
+                break;
+            case "stop" when U.StartStop && e.Who != "schedule":
+                Post($"⚫ {name} went offline.", 0x747F8D);
+                break;
+            case "update" when U.GameUpdates && e.Level == "good":
+                Post($"⬆️ {name} was updated to the newest version. If the game says your version doesn't match, update the game (Steam usually does it by itself).", 0x5865F2);
+                break;
+            case "schedule" when U.Restarts && e.Level != "bad" && (e.Text.EndsWith("Restarted.") || e.Text.EndsWith("Updated and started again.")):
+                Post($"🟢 {name} is back online after its scheduled {(e.Text.Contains("Updated") ? "update" : "restart")}.", 0x3BA55D, server: rt);
+                break;
+        }
+    }
+
+    /// <summary>The scheduler is about to restart, stop or update a server: say so once, at the first warning.</summary>
+    public void OnScheduledWarning(ServerRuntime rt, ScheduledTask t, int minutes)
+    {
+        if (_token == null || !S.Enabled || U.ChannelId.Length == 0 || !U.Restarts || !Shared(rt.Config.Id)) return;
+        if (_warnPosted.TryGetValue(t.Id, out var last) && DateTime.UtcNow - last < TimeSpan.FromMinutes(15)) return;
+        _warnPosted[t.Id] = DateTime.UtcNow;
+        var when = $"in {minutes} minute{(minutes == 1 ? "" : "s")}";
+        Post(t.Action switch
+        {
+            "stop" => $"🟠 **{rt.Config.Name}** shuts down {when} (scheduled).",
+            "update" => $"🟠 **{rt.Config.Name}** restarts {when} to update (scheduled). It's usually back within a few minutes.",
+            _ => $"🟠 **{rt.Config.Name}** restarts {when} (scheduled). It's usually back within a minute or two.",
+        }, 0xFAA61A);
+    }
+
+    private async Task PostAddressChangeAsync()
+    {
+        var host = await HostAsync();
+        var lines = _mgr.Runtimes.Where(r => Shared(r.Config.Id)).Select(r => (r, j: JoinInfo.Resolve(r.Config)))
+            .Where(x => x.j.Code == null && host != null).Select(x => $"**{x.r.Config.Name}**: `{Address(host, x.j)}`").ToList();
+        if (lines.Count == 0) return;
+        Post("🌐 The server address changed. Join with the new one:\n" + string.Join("\n", lines), 0x5865F2, ping: true);
+        QueueBoardUpdate(force: true);
+    }
+
+    private void Post(string text, int color, bool ping = false, ServerRuntime? server = null) => _ = Task.Run(() => PostUpdateAsync(text, color, ping, server));
+
+    /// <summary>Posts a message in the updates channel. Works while the gateway is reconnecting (it's a plain web request).</summary>
+    public async Task PostUpdateAsync(string text, int color, bool ping = false, ServerRuntime? server = null)
+    {
+        if (_token == null || U.ChannelId.Length == 0) throw new InvalidOperationException("Pick an updates channel first.");
+        var fields = new List<object>();
+        if (server != null)
+        {
+            var j = JoinInfo.Resolve(server.Config);
+            var host = j.Code == null ? await HostAsync() : null;
+            if (j.Code != null) fields.Add(new { name = j.CodeLabel ?? "Code", value = $"```{j.Code}```", inline = false });
+            else if (host != null) fields.Add(new { name = "Address", value = $"```{Address(host, j)}```", inline = false });
+        }
+        bool doPing = ping && U.PingRoleId.Length > 0;
+        var payload = new
+        {
+            content = doPing ? $"<@&{U.PingRoleId}>" : "",
+            embeds = new[] { new { description = Trim(text, 4000), color, fields = fields.Count > 0 ? fields : null, timestamp = DateTime.UtcNow.ToString("o") } },
+            allowed_mentions = new { parse = Array.Empty<string>(), roles = doPing ? new[] { U.PingRoleId } : Array.Empty<string>() },
+        };
+        await _postLock.WaitAsync();
+        try
+        {
+            await RestAsync(HttpMethod.Post, $"/channels/{U.ChannelId}/messages", payload);
+            _updatesError = null;
+        }
+        catch (DiscordException ex) { _updatesError = BoardProblem(ex); Log("Couldn't post an update: " + _updatesError, true); throw; }
+        catch (Exception ex) when (ex is HttpRequestException or TaskCanceledException) { _updatesError = "Couldn't reach Discord to post an update."; Log(_updatesError, true); throw; }
+        finally { _postLock.Release(); }
+    }
+
     /// <summary>Called after the settings change: re-renders the board and the bot's status line.</summary>
     public void SettingsChanged() => QueueBoardUpdate(force: true);
 
@@ -581,7 +819,7 @@ public sealed class DiscordBot : IDisposable
         try
         {
             if (S.BoardMessageId.Length == 0) return;
-            var payload = await BoardPayloadAsync(withButtons: true);
+            var payload = await BoardPayloadAsync();
             var json = JsonSerializer.Serialize(payload, Out);
             if (json == _lastBoard) return; // nothing changed: don't spend rate limit
             try
