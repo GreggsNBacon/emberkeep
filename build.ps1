@@ -31,6 +31,13 @@ New-Item -ItemType Directory -Force $phOut | Out-Null
 $node = $env:HOSTBAY_NODE
 if (-not $node) { $node = (Get-Command node -ErrorAction SilentlyContinue).Source }
 if ($node -and (Test-Path (Join-Path $PortHopDir 'build.js'))) {
+  # PortHop's build stamps its version and icon with the resedit package: install it the first time.
+  if ((Test-Path (Join-Path $PortHopDir 'package.json')) -and -not (Test-Path (Join-Path $PortHopDir 'node_modules\resedit'))) {
+    $npm = Join-Path (Split-Path $node) 'npm.cmd'
+    if (-not (Test-Path $npm)) { $npm = 'npm' }
+    Push-Location $PortHopDir
+    try { & $npm install --no-audit --no-fund; if ($LASTEXITCODE) { throw 'npm install for PortHop failed.' } } finally { Pop-Location }
+  }
   & $node (Join-Path $PortHopDir 'build.js') --out $phOut
   if ($LASTEXITCODE) { throw 'Building PortHop failed.' }
 } elseif (Test-Path (Join-Path $PortHopDir 'dist\PortHop.exe')) {
