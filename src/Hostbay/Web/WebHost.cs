@@ -45,7 +45,7 @@ public sealed class WebHost
     public string LocalLoginUrl => $"{LocalUrl}/auth/local?t={Auth.LocalToken}";
 
     /// <summary>Raised after a restart, e.g. when the port changed and the desktop window must reconnect.</summary>
-    public event Action? Restarted;
+    public event Action<bool>? Restarted; // true when the port changed, so the window must move to the new address
 
     public async Task StartAsync()
     {
@@ -74,6 +74,7 @@ public sealed class WebHost
 
     public async Task RestartAsync()
     {
+        int oldPort = Port;
         var old = _app;
         _app = null;
         if (old != null)
@@ -82,7 +83,7 @@ public sealed class WebHost
             await old.DisposeAsync();
         }
         await StartAsync();
-        Restarted?.Invoke();
+        Restarted?.Invoke(Port != oldPort);
     }
 
     public async Task StopAsync()

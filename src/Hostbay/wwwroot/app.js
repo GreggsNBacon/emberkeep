@@ -289,8 +289,16 @@ async function addressMenuItems(format, pick) {
 
 function openModal({ title, body, foot, small, onClose }) {
   const root = $('#modalRoot');
-  const close = () => { backdrop.remove(); document.removeEventListener('keydown', onKey); onClose?.(); };
-  const onKey = e => { if (e.key === 'Escape') close(); };
+  let closed = false;
+  const close = () => {
+    if (closed) return;
+    closed = true;
+    backdrop.remove(); document.removeEventListener('keydown', onKey); onClose?.();
+    // Lets a dialog underneath refresh itself when one opened on top of it closes.
+    document.dispatchEvent(new CustomEvent('hb:modal-closed'));
+  };
+  // Dialogs stack: Escape closes only the one on top.
+  const onKey = e => { if (e.key === 'Escape' && root.lastElementChild === backdrop) { e.stopImmediatePropagation(); close(); } };
   const modal = h('div', { class: `modal${small ? ' small' : ''}`, role: 'dialog', 'aria-modal': 'true', 'aria-label': title },
     h('div', { class: 'modal-head' }, h('h2', {}, title),
       h('button', { class: 'btn btn-icon btn-ghost', type: 'button', 'aria-label': 'Close', onclick: close,
@@ -1671,17 +1679,53 @@ async function appSettingsDialog() {
   let st;
   try { st = await api('GET', '/api/settings'); } catch (e) { toast(e.message, 'bad'); return; }
   const body = h('div', { class: 'field-stack' });
+  // Everything here applies as soon as it's changed, and the dialog stays open (redrawn in place) so you can carry on,
+  // e.g. turn on remote access, then internet access, then copy the link.
+  const redraw = async () => {
+    try { st = await api('GET', '/api/settings'); } catch (e) { toast(e.message, 'bad'); return; }
+    const scroller = body.closest('.modal-body'), top = scroller?.scrollTop || 0;
+    draw();
+    if (scroller) scroller.scrollTop = top;
+  };
+  // Waits for Hostbay's web server to come back after a restart (changing remote access rebinds it).
+  const afterRestart = async () => {
+    for (let i = 0; i < 30; i++) {
+      await new Promise(r => setTimeout(r, 500));
+      try { await api('GET', '/api/settings'); break; } catch { }
+    }
+    await redraw();
+  };
+  const putSettings = async (change, okText) => {
+    const r = await api('PUT', '/api/settings', change);
+    if (r.restarting) { toast('Applying network settings…'); await afterRestart(); }
+    else await redraw();
+    if (okText) toast(okText, 'good');
+  };
   const draw = () => {
     body.replaceChildren();
     const remote = h('input', { type: 'checkbox', ...(st.remoteAccess ? { checked: true } : {}) });
-    const port = h('input', { class: 'input mono', type: 'number', min: 1024, max: 65535, value: st.configuredPort });
+    const port = h('input', { class: 'input mono', type: 'number', min: 1024, max: 65535, value: st.configuredPort, style: { maxWidth: '140px' } });
     const tray = h('input', { type: 'checkbox', ...(st.minimizeToTray ? { checked: true } : {}) });
+    remote.addEventListener('change', () => putSettings({ remoteAccess: remote.checked },
+      remote.checked ? 'Remote access is on.' : 'Remote access is off.').catch(e => { remote.checked = !remote.checked; toast(e.message, 'bad'); }));
+    tray.addEventListener('change', () => putSettings({ minimizeToTray: tray.checked }, 'Saved.').catch(e => { tray.checked = !tray.checked; toast(e.message, 'bad'); }));
+    const applyPort = h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
+      const want = Number(port.value);
+      if (want === st.configuredPort) return;
+      try {
+        const r = await api('PUT', '/api/settings', { port: want });
+        if (!r.restarting) { await redraw(); toast('Saved.', 'good'); return; }
+        // The address changes: the desktop window follows by itself; a browser goes to the new port.
+        toast(`Moving Hostbay to port ${want}…`);
+        if (!isLocal) setTimeout(() => { location.href = `${location.protocol}//${location.hostname}:${want}/`; }, 2000);
+      } catch (e) { toast(e.message, 'bad'); }
+    } }, 'Apply');
 
     // "Reach Hostbay from the internet": opens Hostbay's own port on the router with UPnP.
     // The switch applies immediately; the status box follows the router's answer.
     const internetGroup = () => {
       const inet = h('input', { type: 'checkbox', ...(st.internetAccess ? { checked: true } : {}) });
-      const blocked = !st.listeningOnLan ? 'Turn on remote access and save first.'
+      const blocked = !st.listeningOnLan ? 'Turn on remote access first.'
         : !st.longPassword ? `Every enabled account needs a password of at least ${st.minInternetPasswordLength} characters first.` : null;
       inet.disabled = !!blocked && !st.internetAccess;
       const status = h('div', { class: 'fwd-status' });
@@ -1744,7 +1788,7 @@ async function appSettingsDialog() {
       const line = h('div', { class: 'inline' }, h('span', { class: 'dim' }, 'Checking…'));
       api('GET', '/api/discord').then(d => {
         line.replaceChildren(discordDot(d), h('span', {}, discordSummary(d)),
-          h('button', { class: 'btn btn-small', type: 'button', onclick: () => { m.close(); discordDialog(); } }, d.hasToken ? 'Discord settings' : 'Set up'));
+          h('button', { class: 'btn btn-small', type: 'button', onclick: () => discordDialog() }, d.hasToken ? 'Discord settings' : 'Set up'));
       }).catch(e => line.replaceChildren(h('span', { class: 'dim' }, e.message)));
       return h('div', { class: 'set-group' },
         h('h2', {}, 'Discord bot'),
@@ -1782,13 +1826,13 @@ async function appSettingsDialog() {
         h('div', { class: 'set-rows' },
           h('div', { class: 'set-row' }, h('label', {}, 'Accounts'),
             h('div', { class: 'inline' }, h('span', { class: 'dim' }, st.hasAccounts ? 'People sign in with their own username and password.' : 'No accounts yet.'),
-              h('button', { class: 'btn btn-small', type: 'button', onclick: () => { m.close(); usersDialog(); } }, 'Users & groups'))),
+              h('button', { class: 'btn btn-small', type: 'button', onclick: () => usersDialog() }, 'Users & groups'))),
           h('div', { class: 'set-row' }, h('label', {}, 'Allow remote access'),
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, remote, h('span')),
               h('span', { class: 'dim' }, st.hasAccounts ? (st.listeningOnLan ? 'On. Other devices can connect.' : 'Off. Only this PC can open Hostbay.') : 'Create an account first.'))),
           st.listeningOnLan ? h('div', { class: 'set-row' }, h('label', {}, 'Address'),
             h('div', { class: 'url-list' }, st.lanUrls.length ? st.lanUrls.map(u => copyLine(u, 'the link')) : h('span', { class: 'dim' }, 'No network connection found.'))) : null,
-          h('div', { class: 'set-row' }, h('label', {}, 'Port'), h('div', {}, port,
+          h('div', { class: 'set-row' }, h('label', {}, 'Port'), h('div', {}, h('div', { class: 'inline' }, port, applyPort),
             h('div', { class: 'help' }, st.port !== st.configuredPort ? `Port ${st.configuredPort} was busy, so Hostbay is using ${st.port}.` : 'When you first turn on remote access, Windows asks whether to allow Hostbay through the firewall. Allow it on private networks.'))),
         )),
       internetGroup(),
@@ -1804,20 +1848,16 @@ async function appSettingsDialog() {
       h('p', { class: 'dim', style: { fontSize: '12.5px' } }, `Hostbay ${st.version || ''}`),
     );
     remote.disabled = !st.hasAccounts;
-    save.onclick = async () => {
-      try {
-        const r = await api('PUT', '/api/settings', { remoteAccess: remote.checked, port: Number(port.value), minimizeToTray: tray.checked });
-        if (r.restarting) {
-          toast('Applying network settings…');
-          m.close();
-          // The server restarts; reconnect once it's back.
-          setTimeout(() => location.reload(), 1500);
-        } else { toast('Settings saved.', 'good'); m.close(); }
-      } catch (e) { toast(e.message, 'bad'); }
-    };
   };
-  const save = h('button', { class: 'btn btn-primary', type: 'button' }, 'Save');
-  const m = openModal({ title: 'App settings', body, foot: [isLocal ? null : h('a', { class: 'btn btn-ghost', href: '/auth/logout' }, 'Sign out'), h('span', { class: 'spacer' }), save] });
+  // Discord settings and Users & groups open on top of this dialog; when they close, this one catches up.
+  const onChildClosed = () => { if (document.body.contains(body)) redraw(); };
+  document.addEventListener('hb:modal-closed', onChildClosed);
+  const m = openModal({
+    title: 'App settings', body,
+    foot: [isLocal ? null : h('a', { class: 'btn btn-ghost', href: '/auth/logout' }, 'Sign out'), h('span', { class: 'spacer' }),
+      h('button', { class: 'btn btn-primary', type: 'button', onclick: () => m.close() }, 'Done')],
+    onClose: () => document.removeEventListener('hb:modal-closed', onChildClosed),
+  });
   draw();
 }
 

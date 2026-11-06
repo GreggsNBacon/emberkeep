@@ -61,7 +61,8 @@ public sealed class MainForm : Form
         }) { IsBackground = true, Name = "Hostbay show-signal" };
         t.Start();
 
-        _host.Restarted += () => BeginInvoke(() => { if (_web.CoreWebView2 != null) _web.CoreWebView2.Navigate(_host.LocalLoginUrl); });
+        // Only a new port needs a new page: on the same port the page simply reconnects, so open dialogs stay put.
+        _host.Restarted += portChanged => { if (portChanged) BeginInvoke(() => { if (_web.CoreWebView2 != null) _web.CoreWebView2.Navigate(_host.LocalLoginUrl); }); };
         _mgr.Changed += () => { try { BeginInvoke(UpdateTrayText); } catch { } };
     }
 
