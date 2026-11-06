@@ -16,6 +16,8 @@ public sealed class GameDefinition
     public required string Badge { get; init; }
     public required string Color { get; init; }
     public int[] SteamAppIds { get; init; } = [];
+    /// <summary>Whether SteamCMD can download the server without a Steam login (most dedicated servers). Emberkeep only installs those.</summary>
+    public bool SteamCmdAnonymous { get; init; } = true;
     /// <summary>
     /// Ports to open on the router for this game, e.g. "UDP 2456-2458, TCP 8888" (same lists Watchfire uses).
     /// Entries containing the default join port move with it when a server runs on a different port.
@@ -248,6 +250,7 @@ public static class GameCatalog
             ForwardPorts = "TCP 7777",
             ArtAppId = 105600,
             SteamAppIds = [105600],
+            SteamCmdAnonymous = false, // the server comes with the game itself
             Executables = ["TerrariaServer.exe"],
             DefaultArguments = "-config serverconfig.txt",
             DetectFiles = ["TerrariaServer.exe"],
@@ -351,6 +354,7 @@ public static class GameCatalog
             ForwardPorts = "TCP/UDP 9700",
             ArtAppId = 3058630,
             SteamAppIds = [4564210],
+            SteamCmdAnonymous = false, // Steam only sends it to accounts that own the game
             Executables = ["AssettoCorsaEVOServer.exe"],
             Launcher = "ServerLauncher.exe",
             DetectFiles = ["AssettoCorsaEVOServer.exe"],

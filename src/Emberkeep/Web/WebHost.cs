@@ -30,7 +30,11 @@ public sealed class WebHost
         Learn = new LauncherLearn(mgr);
         Updates = new UpdateChecker(mgr);
         PcRestart = new PcRestart(mgr);
+        Installer = new ServerInstaller(mgr);
     }
+
+    /// <summary>Installs and updates servers with SteamCMD.</summary>
+    public ServerInstaller Installer { get; }
 
     /// <summary>"Restart PC now" and the daily restart.</summary>
     public PcRestart PcRestart { get; }

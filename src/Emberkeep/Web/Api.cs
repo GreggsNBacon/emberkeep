@@ -143,6 +143,7 @@ public static class Api
 
         api.MapDelete("/servers/{id}", (string id) =>
         {
+            if (host.Installer.Busy(id)) return Error("The server's files are being updated. Cancel that first.");
             try { mgr.Remove(id); host.Auth.ForgetServer(id); mgr.Save(); return Results.Ok(); }
             catch (InvalidOperationException ex) { return Error(ex.Message); }
         }).Need(Permissions.Launch);
@@ -179,11 +180,83 @@ public static class Api
 
         api.MapPost("/servers/reorder", (List<string> ids) => { mgr.Reorder(ids); return Results.Ok(); }).Full();
 
+        // ---------- install servers with SteamCMD ----------
+
+        // Status for the Install tab: is SteamCMD set up, and where new servers go by default.
+        api.MapGet("/install", (HttpContext ctx) => new
+        {
+            steamCmdInstalled = SteamCmd.IsInstalled(mgr.Settings),
+            steamCmdPath = SteamCmd.ExePath(mgr.Settings),
+            ownSteamCmd = string.IsNullOrWhiteSpace(mgr.Settings.SteamCmdPath) && AppEnv.Get("STEAMCMD") == null,
+            installRoot = Path.GetDirectoryName(host.Installer.SuggestedDir("x")) ?? "",
+            jobs = host.Installer.Jobs.Select(JobDto),
+        }).Need(Permissions.Launch);
+
+        api.MapGet("/install/suggest", (string title) => new { dir = host.Installer.SuggestedDir(title ?? "Server") }).Need(Permissions.Launch);
+
+        // Free space on the drive a folder is on, so the Install tab can warn before a big download.
+        api.MapGet("/install/space", (string dir) =>
+        {
+            try
+            {
+                var root = Path.GetPathRoot(Path.GetFullPath(dir));
+                if (root == null) return Results.Ok(new { freeBytes = (long?)null });
+                var d = new DriveInfo(root);
+                return Results.Ok(new { freeBytes = (long?)(d.IsReady ? d.AvailableFreeSpace : null) });
+            }
+            catch { return Results.Ok(new { freeBytes = (long?)null }); }
+        }).Need(Permissions.Launch);
+
+        // "Other Steam server": looks an app ID up through SteamCMD so the user sees its name before downloading.
+        api.MapGet("/install/appinfo/{appId:int}", async (int appId, CancellationToken ct) =>
+        {
+            try
+            {
+                await SteamCmd.EnsureAsync(mgr.Settings, _ => { }, ct);
+                var name = await SteamCmd.AppNameAsync(mgr.Settings, appId, ct);
+                var known = GameCatalog.BySteamAppId(appId);
+                return name == null ? Error($"Steam doesn't know an app with ID {appId}.")
+                    : Results.Ok(new { appId, name, gameId = known?.Id });
+            }
+            catch (Exception ex) when (ex is not OperationCanceledException) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
+        api.MapPost("/install", (InstallRequest req, HttpContext ctx) =>
+        {
+            if (!WebHost.Who(ctx).AllServers) return Error("Your group only sees some servers, so it can't add new ones.", 403);
+            int appId = req.AppId ?? 0;
+            string title = req.Name ?? "";
+            if (req.GameId is { } gid)
+            {
+                var g = GameCatalog.Get(gid);
+                if (g.Id == "generic" || g.SteamAppIds.Length == 0) return Error("Emberkeep can't download that game's server.");
+                if (!g.SteamCmdAnonymous) return Error($"{g.Name}'s server comes with the game, so install it through Steam, then add its folder.");
+                appId = g.SteamAppIds[0];
+                if (string.IsNullOrWhiteSpace(title)) title = g.Name;
+            }
+            try { return Results.Ok(JobDto(host.Installer.Install(appId, string.IsNullOrWhiteSpace(title) ? $"App {appId}" : title.Trim(), req.Dir ?? "", req.GameId, req.Name))); }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
+        api.MapPost("/install/{jobId}/cancel", (string jobId) =>
+            host.Installer.Cancel(jobId) ? Results.Ok() : Error("That download has already finished.")).Need(Permissions.Launch);
+        api.MapPost("/install/clear", () => { host.Installer.ClearFinished(); return Results.Ok(); }).Need(Permissions.Launch);
+
+        api.MapPost("/servers/{id}/update-files", (string id) =>
+        {
+            var rt = mgr.Get(id);
+            if (rt == null) return Results.NotFound();
+            try { return Results.Ok(JobDto(host.Installer.Update(rt))); }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
         // ---------- control ----------
 
-        api.MapPost("/servers/{id}/start", (string id) => Control(mgr, id, rt => { _ = rt.StartAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/start", (string id) => host.Installer.Busy(id) ? Error("The server's files are being updated. Start it when that finishes.")
+            : Control(mgr, id, rt => { _ = rt.StartAsync(); })).Need(Permissions.Control);
         api.MapPost("/servers/{id}/stop", (string id) => Control(mgr, id, rt => { _ = rt.StopAsync(); })).Need(Permissions.Control);
-        api.MapPost("/servers/{id}/restart", (string id) => Control(mgr, id, rt => { _ = rt.RestartAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/restart", (string id) => host.Installer.Busy(id) ? Error("The server's files are being updated. Start it when that finishes.")
+            : Control(mgr, id, rt => { _ = rt.RestartAsync(); })).Need(Permissions.Control);
         api.MapPost("/servers/{id}/kill", (string id) => Control(mgr, id, rt => rt.Kill())).Need(Permissions.Kill);
         api.MapPost("/servers/{id}/logs/clear", (string id) => Control(mgr, id, rt => rt.Logs.Clear())).Need(Permissions.Console);
 
@@ -483,6 +556,20 @@ public static class Api
                 s.DailyRestartTime = t.ToString("HH:mm");
             }
             if (req.DailyRestart is bool daily) s.DailyRestart = daily;
+            if (req.SteamCmdPath is string scp)
+            {
+                scp = scp.Trim().Trim('"');
+                if (scp.Length > 0 && (!scp.EndsWith("steamcmd.exe", StringComparison.OrdinalIgnoreCase) || !File.Exists(scp)))
+                    return Error("Choose steamcmd.exe, or leave the box empty to let Emberkeep set SteamCMD up itself.");
+                if (scp.Length > 0 && !SteamCmd.SignedByValve(scp)) return Error("That steamcmd.exe isn't signed by Valve, so Emberkeep won't use it.");
+                s.SteamCmdPath = scp;
+            }
+            if (req.InstallRoot is string root)
+            {
+                root = root.Trim().Trim('"');
+                if (root.Length > 0 && !Path.IsPathFullyQualified(root)) return Error(@"Choose a full folder path, like D:\Game Servers.");
+                s.InstallRoot = root;
+            }
             if (req.CheckForUpdates is bool updates)
             {
                 s.CheckForUpdates = updates;
@@ -665,9 +752,17 @@ public static class Api
 
     private static string OneLine(string json) => json.Replace("\r", "").Replace("\n", "");
 
+    private static object JobDto(InstallJob j) => new
+    {
+        j.Id, j.Kind, j.AppId, j.Title, j.Dir, j.GameId, j.ServerId, state = j.State.ToString().ToLowerInvariant(), j.Percent,
+        j.BytesDone, j.BytesTotal, j.Message, j.Error, j.Finished, j.StartedAt, j.FinishedAt,
+    };
+
+    private sealed record InstallRequest(string? GameId, int? AppId, string? Dir, string? Name);
+
     private static object GameDto(GameDefinition g) => new
     {
-        g.Id, g.Name, g.Badge, g.Color, g.SteamAppIds, g.ArtAppId, g.DefaultArguments, g.Notes, g.QuickCommands,
+        g.Id, g.Name, g.Badge, g.Color, g.SteamAppIds, g.SteamCmdAnonymous, g.ArtAppId, g.DefaultArguments, g.Notes, g.QuickCommands,
         commands = g.Commands, stop = g.Stop, g.StopCommands, g.LogFiles, g.ConfigFiles, g.DefaultRconPort,
     };
 
@@ -742,6 +837,10 @@ public static class Api
         minimizeToTray = mgr.Settings.MinimizeToTray,
         startWithWindows = WindowsStartup.Enabled,
         startupOtherCopy = !WindowsStartup.Enabled && WindowsStartup.RegisteredCommand() != null,
+        steamCmdPath = mgr.Settings.SteamCmdPath,
+        steamCmdInUse = SteamCmd.ExePath(mgr.Settings),
+        steamCmdInstalled = SteamCmd.IsInstalled(mgr.Settings),
+        installRoot = Path.GetDirectoryName(host.Installer.SuggestedDir("x")) ?? "",
         dailyRestart = mgr.Settings.DailyRestart,
         dailyRestartTime = mgr.Settings.DailyRestartTime,
         pcRestart = PcRestartDto(host),
@@ -811,7 +910,7 @@ public static class Api
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
     private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates, bool? StartWithWindows,
-        bool? DailyRestart, string? DailyRestartTime);
+        bool? DailyRestart, string? DailyRestartTime, string? SteamCmdPath, string? InstallRoot);
 
     private static object PcRestartDto(WebHost host)
     {
