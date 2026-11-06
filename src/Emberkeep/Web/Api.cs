@@ -146,6 +146,22 @@ public static class Api
             catch (InvalidOperationException ex) { return Error(ex.Message); }
         }).Need(Permissions.Launch);
 
+        // "Check files again": look at the folder afresh, e.g. after the server finished downloading.
+        api.MapPost("/servers/{id}/recheck", (string id, HttpContext ctx) =>
+        {
+            var rt = mgr.Get(id);
+            if (rt == null) return Results.NotFound();
+            if (rt.State != ServerState.Stopped) return Error("Stop the server before checking its files again.");
+            try
+            {
+                var (next, changes) = ServerRecheck.Run(rt);
+                if (changes.Count > 0) mgr.Update(id, next);
+                _ = ArtCache.AutoDetectAsync(mgr, id); // a newly recognised game may now have artwork
+                return Results.Ok(new { changes, executableFound = ServerRecheck.ExecutableFound(rt), detail = Detail(rt, WebHost.Who(ctx)) });
+            }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
         api.MapPost("/servers/reorder", (List<string> ids) => { mgr.Reorder(ids); return Results.Ok(); }).Full();
 
         // ---------- control ----------
@@ -672,6 +688,7 @@ public static class Api
             resolvedExecutable = canSettings ? rt.ResolveExecutable() : null,
             resolvedWorkingDirectory = canSettings ? rt.ResolveWorkingDirectory() : null,
             installDirExists = Directory.Exists(rt.Config.InstallDir),
+            executableFound = ServerRecheck.ExecutableFound(rt),
             remoteConsole = rc == null ? null : new { rc.Host, rc.Port, hasPassword = rc.Password.Length > 0 },
             logFiles = canLaunch ? rt.LogFilePatterns() : Enumerable.Empty<string>(),
             join = JoinInfo.Resolve(rt.Config),

@@ -241,13 +241,13 @@ function isIpField(f) {
 const isBindField = f => !/public|external|wan|advertis|announce/i.test(f.key);
 
 // A small dropdown anchored under a button. items: [{ label, sub, onClick }] or 'sep'.
-function openMenu(anchor, items) {
+function openMenu(anchor, items, { plain = false } = {}) {
   document.querySelector('.menu-pop')?.remove();
-  const menu = h('div', { class: 'menu-pop', role: 'menu' });
+  const menu = h('div', { class: `menu-pop${plain ? ' plain' : ''}`, role: 'menu' });
   for (const it of items) {
     if (it === 'sep') { menu.append(h('div', { class: 'menu-sep' })); continue; }
     if (it.heading) { menu.append(h('div', { class: 'menu-head' }, it.heading)); continue; }
-    menu.append(h('button', { class: 'menu-item', type: 'button', role: 'menuitem', disabled: it.disabled || null,
+    menu.append(h('button', { class: `menu-item${it.danger ? ' danger' : ''}`, type: 'button', role: 'menuitem', disabled: it.disabled || null,
       onclick: () => { close(); it.onClick?.(); } },
       h('span', { class: 'mi-label' }, it.label), it.sub ? h('span', { class: 'mi-sub' }, it.sub) : null));
   }
@@ -343,6 +343,7 @@ function renderSidebar() {
       class: `server-item${s.id === state.selectedId ? ' active' : ''}`, type: 'button',
       'aria-current': s.id === state.selectedId ? 'true' : null,
       onclick: () => { select(s.id); $('#app').classList.remove('menu'); },
+      oncontextmenu: e => serverContextMenu(e, s.id),
     },
       cachedBadge(`side-${s.id}`, s.gameId, s, false, s.artAppId),
       h('span', { class: 'meta' }, h('span', { class: 'name' }, s.name), h('span', { class: 'sub' }, sub)),
@@ -551,6 +552,13 @@ function renderHeader() {
   } else if (state.detail && !state.detail.installDirExists) {
     n.classList.add('warn'); n.hidden = false;
     n.append(h('span', {}, `The server folder can't be found: ${s.installDir}`));
+  } else if (state.detail && state.detail.executableFound === false && s.state === 'Stopped' && can('launch')) {
+    // Added before its files were all there (still downloading?), or the program was moved.
+    n.classList.add('warn'); n.hidden = false;
+    const exe = state.detail.config?.executable;
+    n.append(h('span', {}, exe ? `${exe} isn't in the server folder yet. If the server is still downloading, check again when it finishes.`
+      : 'Emberkeep hasn\'t found this server\'s program yet. If it\'s still downloading, check again when it finishes.'),
+      h('button', { class: 'btn btn-small', type: 'button', onclick: recheckServer }, 'Check files again'));
   } else if (state.detail?.needsLearn && s.state === 'Stopped') {
     n.hidden = false;
     n.append(h('span', {}, `${g.name} servers are set up in the game's own launcher. Set it up there once and Emberkeep will copy the settings.`),
@@ -764,7 +772,8 @@ function renderFileList() {
   group('Game config files', known);
   group('Other files in the server folder', other);
   if (!data.files.length) {
-    list.append(h('div', { class: 'file-note' }, 'No config files found yet. Many servers create theirs the first time they run, so try starting it once.'));
+    list.append(h('div', { class: 'file-note' }, 'No config files found yet. Many servers create theirs the first time they run, so try starting it once.'),
+      h('button', { class: 'btn btn-small', type: 'button', style: { marginTop: '8px' }, onclick: () => { state.configs = null; loadConfigs(); } }, 'Look again'));
   }
 }
 
@@ -1396,8 +1405,77 @@ function renderSettings() {
   };
 }
 
+// ---------------- server menu ("⋯" in the header, or right-click a server in the list) ----------------
+
+function serverMenu(anchor) {
+  const s = current();
+  if (!s) return;
+  const stopped = s.state === 'Stopped';
+  const items = [];
+  if (can('launch')) items.push({ label: 'Check files again', disabled: !stopped,
+    sub: stopped ? 'Look for the game, server program and config files again, e.g. after a download finishes' : 'Stop the server first',
+    onClick: recheckServer });
+  items.push({ label: 'Find setup help online', sub: 'Web searches for setup guides, config files and ports', onClick: setupHelpDialog });
+  items.push({ label: 'Copy folder path', sub: s.installDir, onClick: () => copyText(s.installDir, 'Copied the folder path.') });
+  if (can('launch')) items.push('sep', { label: 'Remove server', danger: true, disabled: !stopped,
+    sub: stopped ? 'From Emberkeep only: its files stay on disk' : 'Stop the server first', onClick: removeServer });
+  openMenu(anchor, items, { plain: true });
+}
+
+// Right-clicking a server in the list opens the same menu at the pointer.
+async function serverContextMenu(e, id) {
+  e.preventDefault();
+  const x = e.clientX, y = e.clientY;
+  select(id);
+  await loadDetail();
+  const at = { getBoundingClientRect: () => ({ left: x, right: x, top: y, bottom: y }), contains: () => false, focus() { } };
+  serverMenu(at);
+}
+
+async function recheckServer() {
+  const s = current();
+  if (!s) return;
+  try {
+    const r = await api('POST', `/api/servers/${s.id}/recheck`);
+    state.configs = null; // the config list is looked up again too
+    await loadDetail();
+    if (state.tab === 'configs') loadConfigs();
+    if (r.changes.length) toast(r.changes.join(' '), 'good');
+    else if (r.executableFound) toast('Checked the folder again. Nothing new was found.');
+    else toast('The server program still isn\'t in the folder. If it\'s still downloading, check again when it finishes.', 'bad');
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
+// Web searches about this game's server, opened in the browser, plus what Emberkeep already knows about it.
+function setupHelpDialog() {
+  const s = current();
+  if (!s) return;
+  const g = game(s.gameId);
+  const subject = s.gameId === 'generic' ? s.name : g.name;
+  const search = q => `https://www.google.com/search?q=${encodeURIComponent(q)}`;
+  const searches = [
+    ['Setup guide', `How to set up a ${subject} dedicated server`],
+    ['Config files', `${subject} dedicated server config file settings`],
+    ['Ports', `${subject} dedicated server ports to forward`],
+    ['Can\'t connect', `${subject} dedicated server friends can't connect`],
+  ];
+  const known = [];
+  if (g.notes) known.push(h('p', {}, g.notes));
+  if (g.configFiles?.length) known.push(h('div', {}, h('div', { class: 'dim' }, 'Config files Emberkeep looks for:'),
+    h('ul', { class: 'help-files' }, g.configFiles.map(f => h('li', { class: 'mono' }, f)))));
+  const body = h('div', { class: 'field-stack' },
+    h('p', {}, 'Each of these opens a web search in your browser.'),
+    h('div', { class: 'help-searches' }, searches.map(([label, q]) =>
+      h('a', { class: 'help-search', href: search(q), target: '_blank', rel: 'noopener noreferrer' },
+        h('span', { class: 'mi-label' }, label), h('span', { class: 'mi-sub' }, q)))),
+    known.length ? h('div', { class: 'set-group' }, h('h2', {}, 'What Emberkeep already knows'), ...known) : null);
+  const m = openModal({ title: `Setup help: ${subject}`, body, small: true,
+    foot: h('button', { class: 'btn btn-primary', type: 'button', onclick: () => m.close() }, 'Done') });
+}
+
 async function removeServer() {
   const s = current();
+  if (!s) return;
   if (!(await confirmDialog(`Remove ${s.name}?`, 'It will be removed from Emberkeep. Its files stay on disk, and you can add it again later.', { okText: 'Remove', danger: true }))) return;
   try {
     await api('DELETE', `/api/servers/${s.id}`);
@@ -2312,6 +2390,7 @@ function wire() {
   $('#stopBtn').onclick = () => control('stop');
   $('#restartBtn').onclick = () => control('restart');
   $('#killBtn').onclick = () => control('kill');
+  $('#moreBtn').onclick = e => serverMenu(e.currentTarget);
   $('#headPath').onclick = () => copyText(current()?.installDir || '', 'Copied the folder path.');
   $$('.tab[data-tab]').forEach(t => t.onclick = () => setTab(t.dataset.tab));
 

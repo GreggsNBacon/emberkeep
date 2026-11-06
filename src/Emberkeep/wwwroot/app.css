@@ -640,3 +640,16 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .update-title { font-weight: 600; margin-bottom: 8px; }
 .update-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .update-actions a.btn { text-decoration: none; }
+
+/* Server menu: the destructive entry in red */
+.menu-item.danger .mi-label { color: var(--bad-text); }
+/* Setup help: web searches */
+.help-searches { display: grid; gap: 8px; }
+.help-search { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--rope); border-radius: var(--r-md);
+  background: var(--deck); color: var(--fog); text-decoration: none; }
+.help-search:hover { border-color: var(--brand); background: var(--deck-hi); }
+.help-search .mi-sub { color: var(--fog-dim); font-size: 12.5px; }
+.help-files { margin: 6px 0 0; padding-left: 18px; }
+.help-files li { font-size: 12.5px; }
+/* Menus of actions (not addresses or ports) use the normal font */
+.menu-pop.plain .mi-label { font-family: var(--ui); }
