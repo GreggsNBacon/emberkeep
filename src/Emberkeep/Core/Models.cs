@@ -47,6 +47,8 @@ public sealed class ServerInstance
     /// <summary>Extra log files to tail (relative to install dir or absolute).</summary>
     public List<string> ExtraLogFiles { get; set; } = new();
     public int? SteamAppId { get; set; }
+    /// <summary>Set when Emberkeep installed the server with SteamCMD: the app it downloads, so Update server can fetch new versions.</summary>
+    public int? SteamCmdAppId { get; set; }
     /// <summary>Port players connect to. Null means detect it from the launch arguments or game config.</summary>
     public int? JoinPort { get; set; }
     /// <summary>Ports to open on the router, e.g. "UDP 2456-2458, TCP 8888". Empty means use the game's list.</summary>
@@ -81,6 +83,10 @@ public sealed class AppSettings
     public bool DailyRestart { get; set; }
     /// <summary>Local time of day, "HH:mm".</summary>
     public string DailyRestartTime { get; set; } = "05:00";
+    /// <summary>steamcmd.exe to use instead of Emberkeep's own copy. Empty: Emberkeep sets SteamCMD up itself.</summary>
+    public string SteamCmdPath { get; set; } = "";
+    /// <summary>Folder new servers are installed into (each in its own subfolder). Empty: %USERPROFILE%Game Servers.</summary>
+    public string InstallRoot { get; set; } = "";
 }
 
 public sealed record LogLine(long Seq, DateTime Time, string Source, string Text);

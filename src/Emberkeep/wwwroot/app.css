@@ -673,3 +673,16 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
   border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; color: var(--warn-text); }
 .restart-note[hidden] { display: none; }
 .restart-title { font-weight: 600; font-variant-numeric: tabular-nums; }
+/* Install a server: search, app ID row, and the sidebar download progress */
+.install-search { display: flex; flex-direction: column; gap: 10px; margin-bottom: 12px; }
+.install-search p { margin: 0; color: var(--fog-dim); font-size: 13px; }
+.install-search .input { height: 36px; }
+.install-list { max-height: 52vh; overflow: auto; }
+.appid-row { display: grid; gap: 8px; padding: 12px; margin-top: 6px; border: 1px dashed var(--rope-hi); border-radius: var(--r-md); }
+.install-note { display: flex; flex-direction: column; gap: 10px; border: 1px solid var(--rope-hi); background: var(--deck);
+  border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; }
+.install-note[hidden] { display: none; }
+.install-title { font-weight: 600; font-size: 13px; }
+.install-bar { height: 6px; border-radius: 3px; background: var(--hull); overflow: hidden; margin: 6px 0 4px; }
+.install-bar span { display: block; height: 100%; background: linear-gradient(90deg, var(--brand-2), var(--brand)); transition: width .4s; }
+.install-msg { display: flex; justify-content: space-between; gap: 8px; font-size: 12px; color: var(--fog-dim); font-variant-numeric: tabular-nums; }

@@ -547,7 +547,13 @@ function renderHeader() {
   // Notices: start errors, missing folders, game tips.
   const n = $('#headNotice');
   n.replaceChildren(); n.className = 'notice'; n.hidden = true;
-  if (s.lastError && s.state === 'Stopped') {
+  const filesJob = (state.installJobs || []).find(j => !j.finished && j.serverId === s.id);
+  if (filesJob) {
+    // Updating with SteamCMD: the server can't start until it's done.
+    n.hidden = false;
+    n.append(h('span', {}, `Updating the server files: ${filesJob.message}${filesJob.state === 'downloading' ? ` ${Math.round(filesJob.percent)}%` : ''}. Start is unavailable until it finishes.`));
+    $('#startBtn').disabled = true;
+  } else if (s.lastError && s.state === 'Stopped') {
     n.classList.add('bad'); n.hidden = false;
     n.append(h('span', {}, s.lastError), h('button', { class: 'btn btn-small', type: 'button', onclick: () => setTab('settings') }, 'Open settings'));
   } else if (state.detail && !state.detail.installDirExists) {
@@ -1424,6 +1430,8 @@ function serverMenu(anchor) {
   if (can('launch')) items.push({ label: 'Check files again', disabled: !stopped,
     sub: stopped ? 'Look for the game, server program and config files again, e.g. after a download finishes' : 'Stop the server first',
     onClick: recheckServer });
+  if (can('launch') && state.detail?.config?.steamCmdAppId) items.push({ label: 'Update server files', disabled: !stopped || null,
+    sub: stopped ? 'Download the latest version of the server with SteamCMD' : 'Stop the server first', onClick: updateServerFiles });
   items.push({ label: 'Find setup help online', sub: 'Web searches for setup guides, config files and ports', onClick: setupHelpDialog });
   items.push({ label: 'Copy folder path', sub: s.installDir, onClick: () => copyText(s.installDir, 'Copied the folder path.') });
   if (can('launch')) items.push('sep', { label: 'Remove server', danger: true, disabled: !stopped,
@@ -1507,14 +1515,14 @@ function addServerDialog(startTab = 'scan') {
   const tabs = h('div', { class: 'mtabs', role: 'tablist' });
   const panel = h('div');
   const tabBtn = (id, label) => h('button', { class: 'tab', type: 'button', role: 'tab', 'data-t': id, onclick: () => show(id) }, label);
-  tabs.append(tabBtn('scan', 'Found on this PC'), tabBtn('folder', 'Add a folder'));
+  tabs.append(tabBtn('scan', 'Found on this PC'), tabBtn('folder', 'Add a folder'), tabBtn('install', 'Install a server'));
   body.append(tabs, panel);
   const m = openModal({ title: 'Add a server', body });
 
   const show = id => {
     $$('[data-t]', tabs).forEach(b => b.setAttribute('aria-selected', b.dataset.t === id ? 'true' : 'false'));
     panel.replaceChildren();
-    if (id === 'scan') scanPanel(panel, m); else folderPanel(panel, m);
+    if (id === 'scan') scanPanel(panel, m); else if (id === 'install') installPanel(panel, m); else folderPanel(panel, m);
   };
   show(startTab);
 }
@@ -1586,6 +1594,149 @@ function folderPanel(panel, m) {
     } }, 'Browse')),
     result);
   path.style.flex = '1';
+}
+
+// ---------------- install servers (SteamCMD) ----------------
+
+
+// "Install a server" tab: search Emberkeep's games, or any Steam server by app ID, then pick a folder and install.
+function installPanel(panel, m) {
+  const search = h('input', { class: 'input', type: 'search', placeholder: 'Search games, e.g. Valheim', spellcheck: 'false', autofocus: true, 'aria-label': 'Search games' });
+  const list = h('div', { class: 'cand-list install-list' });
+  const form = h('div');
+  const games = Object.values(state.games).filter(g => g.id !== 'generic' && g.steamAppIds?.length).sort((a, b) => a.name.localeCompare(b.name));
+
+  const pick = target => { // target: { gameId?, appId, title }
+    list.hidden = true; search.closest('.install-search').hidden = true;
+    installForm(form, target, m, () => { form.replaceChildren(); list.hidden = false; search.closest('.install-search').hidden = false; search.focus(); });
+  };
+
+  const draw = () => {
+    const q = search.value.trim().toLowerCase();
+    list.replaceChildren();
+    const found = games.filter(g => !q || g.name.toLowerCase().includes(q) || g.id.includes(q));
+    for (const g of found) {
+      const el = h('div', { class: `cand${g.steamCmdAnonymous ? '' : ' added'}` },
+        candArt(g.id, g.artAppId),
+        h('div', { class: 'meta' }, h('div', { class: 'name' }, g.name),
+          h('span', { class: 'dim', style: { fontSize: '12.5px' } }, g.steamCmdAnonymous ? 'Free server download from Steam' : 'Needs a Steam account that owns the game: install it through Steam, then use Found on this PC')),
+        g.steamCmdAnonymous ? h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => pick({ gameId: g.id, appId: g.steamAppIds[0], title: g.name }) }, 'Install') : null);
+      el.style.setProperty('--game', g.color);
+      list.append(el);
+    }
+    if (!found.length) list.append(h('div', { class: 'dim', style: { padding: '10px 2px' } }, `No game in Emberkeep's list matches "${search.value.trim()}". Try its Steam app ID below.`));
+    // Any other Steam server by app ID (for example from SteamDB).
+    const idIn = h('input', { class: 'input mono', type: 'text', inputmode: 'numeric', placeholder: 'App ID, e.g. 896660', style: { maxWidth: '180px' } });
+    if (/^\d{2,9}$/.test(q)) idIn.value = q;
+    const res = h('span', { class: 'dim' });
+    const look = h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
+      const id = Number(idIn.value.trim());
+      if (!id) { res.textContent = 'Enter the server\'s Steam app ID.'; return; }
+      look.disabled = true; res.textContent = 'Asking Steam… (the first time also sets up SteamCMD, which can take a minute)';
+      try {
+        const r = await api('GET', `/api/install/appinfo/${id}`);
+        const known = r.gameId ? game(r.gameId) : null;
+        if (known && !known.steamCmdAnonymous) { res.textContent = `${r.name}: needs a Steam account that owns the game.`; return; }
+        pick({ gameId: r.gameId || null, appId: id, title: known ? known.name : r.name.replace(/ Dedicated Server$/i, '') });
+      } catch (e) { res.textContent = e.message; } finally { look.disabled = false; }
+    } }, 'Look up');
+    idIn.addEventListener('keydown', e => { if (e.key === 'Enter') { e.preventDefault(); look.click(); } });
+    list.append(h('div', { class: 'appid-row' },
+      h('div', {}, h('b', {}, 'Another Steam server'), h('div', { class: 'dim', style: { fontSize: '12.5px' } }, 'Enter its Steam app ID (SteamDB lists them). Emberkeep sets it up as a custom server.')),
+      h('div', { class: 'inline' }, idIn, look), res));
+  };
+  search.addEventListener('input', draw);
+  panel.append(
+    h('div', { class: 'install-search' },
+      h('p', {}, 'Emberkeep downloads the server with Valve\'s SteamCMD (set up automatically the first time) and adds it, ready to start.'),
+      search),
+    list, form);
+  draw();
+}
+
+async function installForm(form, t, m, back) {
+  const g = t.gameId ? game(t.gameId) : null;
+  const name = h('input', { class: 'input', type: 'text', value: t.title });
+  const dir = h('input', { class: 'input mono', type: 'text', spellcheck: 'false' });
+  const space = h('div', { class: 'help' });
+  const go = h('button', { class: 'btn btn-primary', type: 'button' }, 'Install');
+  const checkSpace = async () => {
+    space.textContent = '';
+    try { const r = await api('GET', `/api/install/space?dir=${encodeURIComponent(dir.value)}`); if (r.freeBytes != null) space.textContent = `${fmtBytes(r.freeBytes)} free on that drive. Servers usually need 1 to 30 GB.`; } catch { }
+  };
+  try { dir.value = (await api('GET', `/api/install/suggest?title=${encodeURIComponent(t.title)}`)).dir; } catch { }
+  dir.addEventListener('change', checkSpace);
+  checkSpace();
+  go.onclick = async () => {
+    go.disabled = true;
+    try {
+      const job = await api('POST', '/api/install', { gameId: t.gameId || null, appId: t.appId, dir: dir.value.trim(), name: name.value.trim() });
+      m.close();
+      toast(`Installing ${job.title}. You can keep using Emberkeep while it downloads.`, 'good');
+      watchInstalls(job.id);
+    } catch (e) { toast(e.message, 'bad'); go.disabled = false; }
+  };
+  form.replaceChildren(h('div', { class: 'field-stack' },
+    h('div', { class: 'cand' }, candArt(g?.id || 'generic', g?.artAppId), h('div', { class: 'meta' }, h('div', { class: 'name' }, g?.name || t.title),
+      h('span', { class: 'dim', style: { fontSize: '12.5px' } }, `Steam app ${t.appId}`))),
+    g?.notes ? h('div', { class: 'notice' }, g.notes) : !g ? h('div', { class: 'notice warn' }, 'Emberkeep doesn\'t know this game yet, so after the download it is added as a custom server. Check its Settings tab, and use Find setup help online in its menu.') : null,
+    h('label', {}, 'Name', name),
+    h('label', {}, 'Install into', h('div', { class: 'row gap' }, dir, h('button', { class: 'btn', type: 'button', onclick: async () => {
+      const p = await browse({ title: 'Choose where to install the server', start: dir.value });
+      if (p) { dir.value = p; checkSpace(); }
+    } }, 'Browse'))),
+    space,
+    h('div', { class: 'row gap' }, h('button', { class: 'btn btn-ghost', type: 'button', onclick: back }, 'Back'), h('span', { class: 'spacer' }), go)));
+  dir.style.flex = '1';
+}
+
+// Sidebar note while servers download or update, with progress and Cancel. Polls only while something is running.
+let installTimer = null, installSeen = new Set(), installWatching = new Set();
+function watchInstalls(jobId) {
+  if (jobId) installWatching.add(jobId);
+  clearTimeout(installTimer);
+  pollInstalls();
+}
+async function pollInstalls() {
+  const el = $('#installNote');
+  if (!el || !(state.me?.full || state.me?.canAddServers)) return;
+  let st;
+  try { st = await api('GET', '/api/install'); } catch { installTimer = setTimeout(pollInstalls, 5000); return; }
+  state.installJobs = st.jobs;
+  const running = st.jobs.filter(j => !j.finished);
+  // Announce jobs that finished since the last look (only ones this page saw running or started).
+  for (const j of st.jobs.filter(j => j.finished && (installWatching.has(j.id) || installSeen.has(j.id)))) {
+    installWatching.delete(j.id); installSeen.delete(j.id);
+    if (j.state === 'done') {
+      toast(j.kind === 'install' ? `${j.title} is installed and ready to start.` : `${j.title} is up to date.`, 'good');
+      if (j.kind === 'install' && j.serverId) setTimeout(() => select(j.serverId), 600);
+      else if (j.serverId === state.selectedId) loadDetail();
+    } else if (j.state === 'failed') toast(`${j.kind === 'install' ? 'Installing' : 'Updating'} ${j.title} failed: ${j.error}`, 'bad');
+  }
+  running.forEach(j => installSeen.add(j.id));
+  el.hidden = !running.length;
+  el.replaceChildren(...running.map(j => {
+    const pct = Math.max(0, Math.min(100, j.percent || 0));
+    const bytes = j.bytesTotal > 0 ? ` · ${fmtBytes(j.bytesDone)} of ${fmtBytes(j.bytesTotal)}` : '';
+    return h('div', { class: 'install-job' },
+      h('div', { class: 'install-title' }, `${j.kind === 'install' ? 'Installing' : 'Updating'} ${j.title}`),
+      h('div', { class: 'install-bar' }, h('span', { style: { width: `${j.state === 'downloading' ? pct : 0}%` } })),
+      h('div', { class: 'install-msg' }, h('span', {}, j.state === 'downloading' ? `${j.message} ${pct.toFixed(0)}%${bytes}` : j.message),
+        h('button', { class: 'link', type: 'button', onclick: async () => {
+          try { await api('POST', `/api/install/${j.id}/cancel`); } catch (e) { toast(e.message, 'bad'); }
+          watchInstalls();
+        } }, 'Cancel')));
+  }));
+  if (state.selectedId && running.some(j => j.serverId === state.selectedId)) renderHeader();
+  if (running.length) installTimer = setTimeout(pollInstalls, 1500);
+}
+
+// "Update server files" in the server menu, for servers Emberkeep installed with SteamCMD.
+async function updateServerFiles() {
+  const s = current();
+  if (!s) return;
+  try { const job = await api('POST', `/api/servers/${s.id}/update-files`); toast(`Updating ${s.name}…`); watchInstalls(job.id); }
+  catch (e) { toast(e.message, 'bad'); }
 }
 
 // ---------------- learn from launcher ----------------
@@ -1942,6 +2093,26 @@ async function appSettingsDialog() {
     startup.addEventListener('change', () => putSettings({ startWithWindows: startup.checked },
       startup.checked ? 'Emberkeep will start with Windows.' : 'Emberkeep won\'t start with Windows.').catch(e => { startup.checked = !startup.checked; toast(e.message, 'bad'); }));
 
+    // Installing servers: where new servers go, and which SteamCMD downloads them.
+    const installGroup = () => {
+      const root = h('input', { class: 'input mono', type: 'text', value: st.installRoot, spellcheck: 'false' });
+      const scp = h('input', { class: 'input mono', type: 'text', value: st.steamCmdPath, placeholder: 'Empty: Emberkeep sets SteamCMD up itself', spellcheck: 'false' });
+      const save = (change, ok) => putSettings(change, ok).catch(e => toast(e.message, 'bad'));
+      root.addEventListener('change', () => save({ installRoot: root.value }, 'Saved.'));
+      scp.addEventListener('change', () => save({ steamCmdPath: scp.value }, scp.value ? 'Emberkeep will use that SteamCMD.' : 'Emberkeep will use its own SteamCMD.'));
+      return h('div', { class: 'set-group' },
+        h('h2', {}, 'Installing servers'),
+        h('p', {}, "Install a server in Add server downloads it with Valve's SteamCMD. Emberkeep sets SteamCMD up the first time and only runs it once Windows confirms it's signed by Valve."),
+        h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Install folder'),
+            h('div', {}, h('div', { class: 'row gap' }, root, h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
+              const p = await browse({ title: 'Choose where new servers go', start: root.value });
+              if (p) { root.value = p; save({ installRoot: p }, 'Saved.'); }
+            } }, 'Browse')), h('div', { class: 'help' }, 'Each new server gets its own folder in here, named after the game.'))),
+          h('div', { class: 'set-row' }, h('label', {}, 'SteamCMD'),
+            h('div', {}, scp, h('div', { class: 'help' }, st.steamCmdInstalled ? `In use: ${st.steamCmdInUse}` : 'Not set up yet. Emberkeep downloads it from Valve the first time you install a server.')))));
+    };
+
     // Restart this PC: now (after a minute's countdown) or every day at a set time. Servers are stopped properly first.
     const restartGroup = () => {
       const daily = h('input', { type: 'checkbox', ...(st.dailyRestart ? { checked: true } : {}) });
@@ -2142,6 +2313,7 @@ async function appSettingsDialog() {
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, tray, h('span')), h('span', { class: 'dim' }, 'Closing the window while servers run hides Emberkeep in the tray instead of quitting'))),
           h('div', { class: 'set-row' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)),
         )),
+      installGroup(),
       restartGroup(),
       updatesGroup(),
     );
@@ -2506,6 +2678,7 @@ function wire() {
   $('#addServerBtn').onclick = () => addServerDialog('scan');
   $('#emptyScanBtn').onclick = () => addServerDialog('scan');
   $('#emptyFolderBtn').onclick = () => addServerDialog('folder');
+  $('#emptyInstallBtn').onclick = () => addServerDialog('install');
   $('#appSettingsBtn').onclick = appSettingsDialog;
   $('#menuOpen').onclick = () => $('#app').classList.add('menu');
   $('#menuClose').onclick = () => $('#app').classList.remove('menu');
@@ -2576,6 +2749,7 @@ function applyAccount() {
   $('#addServerBtn').hidden = !me.canAddServers;
   $('#emptyScanBtn').hidden = !me.canAddServers;
   $('#emptyFolderBtn').hidden = !me.canAddServers;
+  $('#emptyInstallBtn').hidden = !me.canAddServers;
   if (!me.canAddServers) {
     $('#emptyState h1').textContent = 'No servers here yet';
     $('#emptyState p').textContent = 'The host hasn\'t shared any servers with your account yet.';
@@ -2613,6 +2787,7 @@ async function init() {
   setInterval(() => refreshUpdateNote(), 30 * 60000);
   // A restart can also be started from another device, or by the daily restart: look every 15 s.
   refreshPcRestart();
+  watchInstalls(); // downloads already running (e.g. started from another device)
   setInterval(() => refreshPcRestart(), 15000);
   if (hash.get('dialog') === 'add') addServerDialog(hash.get('addtab') || 'scan');
   if (hash.get('dialog') === 'settings') appSettingsDialog();
