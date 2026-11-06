@@ -62,6 +62,15 @@ public sealed class WebHost
             {
                 var app = Build(port, lan);
                 await app.StartAsync();
+                if (!await AnswersLocally(port))
+                {
+                    // Listening on all addresses can succeed while another program holds 127.0.0.1 on the same port; the
+                    // window would then reach that program and be refused. Use the next port instead.
+                    using (var cts = new System.Threading.CancellationTokenSource(2000)) await app.StopAsync(cts.Token);
+                    await app.DisposeAsync();
+                    last = new IOException($"Another program answers on 127.0.0.1:{port}.");
+                    continue;
+                }
                 _app = app; Port = port; ListeningOnLan = lan;
                 ApplyForwarding();
                 Discord.Start();
@@ -75,6 +84,21 @@ public sealed class WebHost
             }
         }
         throw new InvalidOperationException("Couldn't open a port for the Emberkeep UI.", last);
+    }
+
+    // A random value only this copy of Emberkeep knows, to recognise its own answer on 127.0.0.1.
+    private readonly string _instanceId = Guid.NewGuid().ToString("N");
+    private const string InstancePath = "/auth/instance";
+
+    private async Task<bool> AnswersLocally(int port)
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            var answer = await http.GetStringAsync($"http://127.0.0.1:{port}{InstancePath}");
+            return answer == _instanceId;
+        }
+        catch { return false; }
     }
 
     public async Task RestartAsync()
@@ -142,6 +166,14 @@ public sealed class WebHost
         var path = ctx.Request.Path.Value ?? "/";
         var remote = ctx.Connection.RemoteIpAddress;
         bool loopback = remote != null && IPAddress.IsLoopback(remote);
+
+        if (path == InstancePath)
+        {
+            // Only from this PC: lets Emberkeep check at startup that 127.0.0.1 really reaches it.
+            if (loopback) await ctx.Response.WriteAsync(_instanceId);
+            else ctx.Response.StatusCode = 404;
+            return;
+        }
 
         if (path == "/auth/local")
         {
