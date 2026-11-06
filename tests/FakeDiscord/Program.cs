@@ -1,5 +1,5 @@
-// A stand-in for Discord's REST API and gateway, so Hostbay's bot can be tested without a real bot token.
-// Usage: FakeDiscord [port]   then run Hostbay with HOSTBAY_DISCORD_API=http://127.0.0.1:<port>/api/v10
+// A stand-in for Discord's REST API and gateway, so Emberkeep's bot can be tested without a real bot token.
+// Usage: FakeDiscord [port]   then run Emberkeep with EMBERKEEP_DISCORD_API=http://127.0.0.1:<port>/api/v10
 // Accepts the token "good-token-0123456789abcdef". Test hooks live under /_test.
 using System.Collections.Concurrent;
 using System.Net.WebSockets;

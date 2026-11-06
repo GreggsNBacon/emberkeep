@@ -1,0 +1,145 @@
+<!DOCTYPE html>
+<html lang="en">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width, initial-scale=1">
+<title>Emberkeep</title>
+<link rel="icon" href="/favicon.svg" type="image/svg+xml">
+<script src="/theme.js"></script>
+<link rel="stylesheet" href="/app.css">
+</head>
+<body>
+<div class="app" id="app">
+  <aside class="sidebar" id="sidebar">
+    <div class="brand">
+      <img src="/favicon.svg" alt="" width="28" height="28">
+      <span>Emberkeep</span>
+      <button class="btn btn-icon menu-close" id="menuClose" type="button" aria-label="Close menu">
+        <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+      </button>
+    </div>
+    <nav class="server-list" id="serverList" aria-label="Servers"></nav>
+    <div class="sidebar-foot">
+      <button class="btn btn-primary wide" id="addServerBtn" type="button">Add server</button>
+      <button class="btn btn-ghost wide" id="appSettingsBtn" type="button">App settings</button>
+      <button class="whoami" id="whoami" type="button" title="Your account"></button>
+    </div>
+  </aside>
+
+  <main class="main" id="main">
+    <button class="btn btn-icon menu-open" id="menuOpen" type="button" aria-label="Show servers">
+      <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
+    </button>
+
+    <section class="empty-state" id="emptyState" hidden>
+      <div class="empty-art" aria-hidden="true"><span></span><span></span><span></span></div>
+      <h1>Bring your servers aboard</h1>
+      <p>Emberkeep looks through your Steam libraries for dedicated servers. You can also point it at any folder, such as a Minecraft server.</p>
+      <div class="row gap">
+        <button class="btn btn-primary" id="emptyScanBtn" type="button">Find servers on this PC</button>
+        <button class="btn" id="emptyFolderBtn" type="button">Add a folder</button>
+      </div>
+    </section>
+
+    <section class="server-view" id="serverView" hidden>
+      <header class="server-head" id="serverHead">
+        <div class="head-main">
+          <div class="badge big" id="headBadge"></div>
+          <div class="head-title">
+            <h1 id="headName"></h1>
+            <div class="head-sub">
+              <span id="headGame"></span>
+              <button class="link mono-path" id="headPath" type="button" title="Copy folder path"></button>
+            </div>
+          </div>
+          <div class="head-controls">
+            <button class="btn btn-go" id="startBtn" type="button">Start</button>
+            <button class="btn" id="restartBtn" type="button">Restart</button>
+            <button class="btn btn-stop" id="stopBtn" type="button">Stop</button>
+            <button class="btn btn-icon" id="killBtn" type="button" title="Force-close (the world won't be saved)" aria-label="Force-close">
+              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 2.5v7M5.6 5.2a6.5 6.5 0 1 0 8.8 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+            </button>
+          </div>
+        </div>
+        <dl class="stats">
+          <div><dt>Status</dt><dd id="statState"></dd></div>
+          <div><dt>Uptime</dt><dd id="statUptime">–</dd></div>
+          <div><dt>CPU</dt><dd id="statCpu">–</dd></div>
+          <div><dt>Memory</dt><dd id="statMem">–</dd></div>
+          <div><dt>Process ID</dt><dd id="statPid">–</dd></div>
+          <div class="stat-join"><dt id="joinLabel">Join address</dt><dd id="joinValue">–</dd></div>
+          <div class="stat-ports"><dt>Router ports</dt><dd id="portsValue">–</dd></div>
+        </dl>
+        <div class="notice" id="headNotice" hidden></div>
+        <div class="tabs" role="tablist">
+          <button role="tab" class="tab" data-tab="console" type="button">Console</button>
+          <button role="tab" class="tab" data-tab="configs" type="button">Config files</button>
+          <button role="tab" class="tab" data-tab="settings" type="button">Settings</button>
+        </div>
+      </header>
+
+      <div class="tab-panel panel-console" id="panel-console" role="tabpanel">
+        <div class="toolbar">
+          <input class="input search" id="logFilter" type="search" placeholder="Filter the log" aria-label="Filter the log">
+          <label class="check"><input type="checkbox" id="logWrap" checked> Wrap lines</label>
+          <label class="check"><input type="checkbox" id="logTimes"> Timestamps</label>
+          <span class="spacer"></span>
+          <button class="btn btn-small btn-ghost" id="copyLogBtn" type="button">Copy log</button>
+          <button class="btn btn-small btn-ghost" id="clearLogBtn" type="button">Clear</button>
+        </div>
+        <div class="console-wrap">
+          <div class="console" id="console" tabindex="0" aria-label="Server log"></div>
+          <button class="jump" id="jumpBtn" type="button" hidden>Jump to latest</button>
+        </div>
+        <div class="quick" id="quickCmds"></div>
+        <form class="cmd" id="cmdForm" autocomplete="off">
+          <span class="prompt" aria-hidden="true">&gt;</span>
+          <input class="cmd-input" id="cmdInput" type="text" spellcheck="false" aria-label="Command">
+          <button class="btn btn-small" id="cmdSend" type="submit">Send</button>
+        </form>
+      </div>
+
+      <div class="tab-panel panel-configs" id="panel-configs" role="tabpanel" hidden>
+        <div class="file-list" id="fileList"></div>
+        <div class="editor">
+          <div class="editor-empty" id="editorEmpty"><p>Choose a file to edit it.</p></div>
+          <div class="editor-body" id="editorBody" hidden>
+            <div class="editor-bar">
+              <div class="editor-file">
+                <strong id="edName"></strong>
+                <span class="mono-path dim" id="edPath"></span>
+              </div>
+              <div class="seg" role="group" aria-label="Editor mode">
+                <button type="button" data-mode="form" class="seg-btn">Form</button>
+                <button type="button" data-mode="text" class="seg-btn">Text</button>
+              </div>
+            </div>
+            <div class="toolbar">
+              <input class="input search" id="formFilter" type="search" placeholder="Find a setting" aria-label="Find a setting">
+              <span class="spacer"></span>
+              <select class="input select" id="backupSelect" aria-label="Backups"></select>
+              <button class="btn btn-small btn-ghost" id="revertBtn" type="button">Discard changes</button>
+              <button class="btn btn-small btn-primary" id="saveBtn" type="button">Save</button>
+            </div>
+            <div class="notice" id="edNotice" hidden></div>
+            <div class="form-view" id="formView"></div>
+            <div class="text-view" id="textView" hidden>
+              <pre class="gutter" id="gutter" aria-hidden="true"></pre>
+              <textarea id="textArea" spellcheck="false" wrap="off" aria-label="File contents"></textarea>
+            </div>
+          </div>
+        </div>
+      </div>
+
+      <div class="tab-panel panel-settings" id="panel-settings" role="tabpanel" hidden>
+        <form class="settings" id="settingsForm" autocomplete="off"></form>
+      </div>
+    </section>
+  </main>
+</div>
+
+<div class="modal-root" id="modalRoot"></div>
+<div class="toasts" id="toasts" aria-live="polite"></div>
+<script src="/app.js"></script>
+</body>
+</html>

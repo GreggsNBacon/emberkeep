@@ -1,6 +1,6 @@
 // Finds the router, reads its public IP and (with --map) adds then removes a test mapping
 // for a port nothing listens on, so nothing is actually exposed.
-using Hostbay.Core;
+using Emberkeep.Core;
 
 var gw = await Upnp.DiscoverAsync(TimeSpan.FromSeconds(3));
 if (gw == null) { Console.WriteLine("No UPnP router answered."); return 1; }
@@ -11,8 +11,8 @@ if (args.Contains("--map"))
     const int testPort = 47913;
     try
     {
-        try { await Upnp.AddPortMappingAsync(gw, testPort, testPort, "TCP", "Hostbay test (removed)", 120); }
-        catch (UpnpException e) when (e.Code == 725) { await Upnp.AddPortMappingAsync(gw, testPort, testPort, "TCP", "Hostbay test (removed)", 0); Console.WriteLine("  (router needs permanent leases)"); }
+        try { await Upnp.AddPortMappingAsync(gw, testPort, testPort, "TCP", "Emberkeep test (removed)", 120); }
+        catch (UpnpException e) when (e.Code == 725) { await Upnp.AddPortMappingAsync(gw, testPort, testPort, "TCP", "Emberkeep test (removed)", 0); Console.WriteLine("  (router needs permanent leases)"); }
         Console.WriteLine($"  added mapping TCP {testPort} -> {gw.LocalAddress}:{testPort}");
     }
     catch (Exception e) { Console.WriteLine($"  add failed: {e.Message}"); }

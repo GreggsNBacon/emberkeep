@@ -1,5 +1,5 @@
 # Renders an HTML page to a transparent 1024x1024 PNG with headless Edge (DevTools protocol).
-param([string]$Html, [string]$Out, [int]$Width = 1024, [int]$Height = 1024, [int]$Port = 9334)
+param([string]$Html, [string]$Out, [int]$Width = 1024, [int]$Height = 1024, [int]$Port = 9334, [string]$Query = "")
 $edge = "${env:ProgramFiles(x86)}\Microsoft\Edge\Application\msedge.exe"
 $prof = Join-Path $env:TEMP "hb-render-prof"; Remove-Item -Recurse -Force $prof -ErrorAction SilentlyContinue
 $p = Start-Process $edge -ArgumentList "--headless=new","--disable-gpu","--remote-debugging-port=$Port","--user-data-dir=$prof","--force-device-scale-factor=1","about:blank" -PassThru
@@ -17,7 +17,7 @@ try {
   }
   Send 'Emulation.setDeviceMetricsOverride' @{ width = $Width; height = $Height; deviceScaleFactor = 1; mobile = $false } | Out-Null
   Send 'Emulation.setDefaultBackgroundColorOverride' @{ color = @{ r = 0; g = 0; b = 0; a = 0 } } | Out-Null
-  Send 'Page.navigate' @{ url = ([Uri](Resolve-Path $Html).Path).AbsoluteUri } | Out-Null
+  Send 'Page.navigate' @{ url = ([Uri](Resolve-Path $Html).Path).AbsoluteUri + $Query } | Out-Null
   Start-Sleep -Seconds 2
   $r = Send 'Page.captureScreenshot' @{ format = 'png'; clip = @{ x = 0; y = 0; width = $Width; height = $Height; scale = 1 } }
   [IO.File]::WriteAllBytes($Out, [Convert]::FromBase64String($r.result.data)); "saved $Out"

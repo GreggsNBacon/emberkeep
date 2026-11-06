@@ -10,6 +10,6 @@
     <NoWarn>$(NoWarn);MSB3277</NoWarn>
   </PropertyGroup>
   <ItemGroup>
-    <ProjectReference Include="..\..\src\Hostbay\Hostbay.csproj" />
+    <ProjectReference Include="..\..\src\Emberkeep\Emberkeep.csproj" />
   </ItemGroup>
 </Project>
