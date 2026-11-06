@@ -4,6 +4,8 @@
 
 A Windows app for running game servers for you and your friends. Run `Emberkeep.exe` on the PC that hosts the servers. You can then manage them from that PC or from any browser on your network.
 
+![Emberkeep running a Minecraft server: the server list, live console with players chatting, join address and open router ports](docs/screenshots/console.png)
+
 Emberkeep was called **Hostbay**, and Watchfire was called **PortHop**. Installing Emberkeep over Hostbay upgrades it in place: servers, accounts, settings, the Discord bot token and Watchfire's saved forwards all carry over. The data folders are moved to their new names on first start, and router forwards made under the old names are still recognised.
 
 ## Download
@@ -34,6 +36,15 @@ Just want the port forwarding? Watchfire has its own download in the [Watchfire 
 - **Shows join addresses.** Each server shows the address friends join with (your public IP by default, plus the right port, read from the launch arguments or game config), with Copy buttons for local network, VPN and public addresses. IP settings in config files get a "Fill current IP" button. App settings lists all of this PC's addresses with Copy buttons.
 - **Picks up running servers.** If a server was already running when Emberkeep started, Emberkeep detects it and can stop it and show its log files.
 - **Learns from a game's own launcher.** Some games set their server up in their own program (Assetto Corsa EVO's Server Launcher, for example). Under Settings → Launch → Launcher, "Learn from launcher" opens that program, waits for it to start the server, and reads the exact program and command line it used, so Emberkeep can then run the server itself. Settings passed encoded inside the command line (Base64, zlib, gzip or a length prefix plus zlib) are saved as JSON files in `EmberkeepConfig`. They show up in Config files and are encoded again each time the server starts. Emberkeep spots a launcher in a server folder on its own: a windowed program next to the console server with a name like "launcher" or "config".
+
+## Screenshots
+
+| | |
+|---|---|
+| ![Editing Palworld's settings in the form view](docs/screenshots/config.png) | ![App settings: colour themes and this PC's addresses](docs/screenshots/settings.png) |
+| **Config files.** Each game's settings as a form, with backups on every save. | **App settings.** Colour themes, this PC's addresses with Copy buttons, and remote access. |
+| ![Emberkeep in the Light theme](docs/screenshots/light.png) | |
+| **Light theme.** Also Flame, Void and High contrast. | |
 
 ## Supported games
 
