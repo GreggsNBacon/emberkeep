@@ -1705,6 +1705,43 @@ function themePicker() {
     wrap);
 }
 
+// ---------------- updates ----------------
+
+// The sidebar notice when a newer Emberkeep is out (full-access accounts only: installing it restarts Emberkeep).
+async function refreshUpdateNote(u) {
+  const el = $('#updateNote');
+  if (!el || !state.me?.full) return;
+  if (!u) { try { u = await api('GET', '/api/update'); } catch { return; } }
+  const a = u.available;
+  el.hidden = !a;
+  if (!a) { el.replaceChildren(); return; }
+  el.replaceChildren(
+    h('div', { class: 'update-title' }, `Emberkeep ${a.version} is out`),
+    h('div', { class: 'update-actions' },
+      a.canInstall ? h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => installUpdate(u) }, 'Install update') : null,
+      h('a', { class: 'btn btn-small btn-ghost', href: a.pageUrl, target: '_blank', rel: 'noopener' }, 'What\'s new')));
+}
+
+function updateStatusText(u) {
+  if (u.available) return `Emberkeep ${u.available.version} is available.`;
+  if (u.error) return u.error;
+  if (!u.checkedAt) return u.enabled ? 'Checking soon.' : 'Not checked.';
+  return 'You\'re up to date.';
+}
+
+async function installUpdate(u) {
+  const running = state.servers.filter(s => s.state && s.state !== 'Stopped');
+  const what = running.length === 1 ? running[0].name : `your ${running.length} running servers`;
+  const msg = (running.length ? `The installer closes Emberkeep, which safely stops ${what}. ` : 'The installer closes Emberkeep while it updates. ')
+    + 'Its last page can start Emberkeep again.' + (isLocal ? '' : ' The installer opens on the host PC.');
+  if (!(await confirmDialog(`Install Emberkeep ${u.available.version}?`, msg, { okText: 'Download and install' }))) return;
+  toast('Downloading the update…');
+  try {
+    await api('POST', '/api/update/install');
+    toast(isLocal ? 'The installer is open.' : 'The installer is open on the host PC.', 'good');
+  } catch (e) { toast(e.message, 'bad'); }
+}
+
 // ---------------- app settings ----------------
 
 async function appSettingsDialog() {
@@ -1753,6 +1790,32 @@ async function appSettingsDialog() {
         if (!isLocal) setTimeout(() => { location.href = `${location.protocol}//${location.hostname}:${want}/`; }, 2000);
       } catch (e) { toast(e.message, 'bad'); }
     } }, 'Apply');
+
+    // Updates: the automatic check (GitHub, on start and every 12 hours), this copy's version and a Check now button.
+    const updatesGroup = () => {
+      const auto = h('input', { type: 'checkbox', ...(st.checkForUpdates ? { checked: true } : {}) });
+      auto.addEventListener('change', () => putSettings({ checkForUpdates: auto.checked }, auto.checked ? 'Emberkeep will check for updates.' : 'Update checks are off.')
+        .catch(e => { auto.checked = !auto.checked; toast(e.message, 'bad'); }));
+      const status = h('div', { class: 'inline' }, h('span', { class: 'dim' }, 'Looking…'));
+      const show = u => {
+        status.replaceChildren(
+          h('span', u.error && !u.available ? { style: { color: 'var(--bad-text)' } } : { class: 'dim' }, updateStatusText(u)),
+          u.available?.canInstall ? h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => installUpdate(u) }, 'Install') : null,
+          h('button', { class: 'btn btn-small', type: 'button', onclick: async e => {
+            e.currentTarget.disabled = true;
+            try { const r = await api('POST', '/api/update/check'); show(r); refreshUpdateNote(r); } catch (err) { toast(err.message, 'bad'); show(u); }
+          } }, 'Check now'));
+      };
+      api('GET', '/api/update').then(show).catch(() => status.replaceChildren());
+      return h('div', { class: 'set-group' },
+        h('h2', {}, 'Updates'),
+        h('p', {}, 'Emberkeep asks GitHub for its latest release when it starts and every 12 hours. Nothing about you or your servers is sent.'),
+        h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Check automatically'),
+            h('div', { class: 'inline' }, h('span', { class: 'toggle' }, auto, h('span')),
+              h('span', { class: 'dim' }, st.checkForUpdates ? 'On' : 'Off. Use Check now to look yourself.'))),
+          h('div', { class: 'set-row' }, h('label', {}, `Version ${st.version || ''}`), status)));
+    };
 
     // "Reach Emberkeep from the internet": opens Emberkeep's own port on the router with UPnP.
     // The switch applies immediately; the status box follows the router's answer.
@@ -1879,7 +1942,7 @@ async function appSettingsDialog() {
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, tray, h('span')), h('span', { class: 'dim' }, 'Closing the window while servers run hides Emberkeep in the tray instead of quitting'))),
           h('div', { class: 'set-row' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)),
         )),
-      h('p', { class: 'dim', style: { fontSize: '12.5px' } }, `Emberkeep ${st.version || ''}`),
+      updatesGroup(),
     );
     remote.disabled = !st.hasAccounts;
   };
@@ -2339,6 +2402,10 @@ async function init() {
   renderAll();
   if (state.selectedId) { loadDetail(); connectLogs(); }
   connectEvents();
+  // Update notice: Emberkeep's first check runs ~20 s after it starts, so look again shortly, then every half hour.
+  refreshUpdateNote();
+  setTimeout(() => refreshUpdateNote(), 30000);
+  setInterval(() => refreshUpdateNote(), 30 * 60000);
   if (hash.get('dialog') === 'add') addServerDialog(hash.get('addtab') || 'scan');
   if (hash.get('dialog') === 'settings') appSettingsDialog();
 }

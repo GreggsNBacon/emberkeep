@@ -402,6 +402,16 @@ public static class Api
         api.MapPost("/watchfire/show", async () =>
             await WatchfireClient.ShowAsync() ? Results.Ok() : Error("Watchfire isn't installed on this PC.")).Full();
 
+        // ---------- updates (full access) ----------
+
+        api.MapGet("/update", () => UpdateDto(mgr, host)).Full();
+        api.MapPost("/update/check", async () => { await host.Updates.CheckAsync(); return Results.Ok(UpdateDto(mgr, host)); }).Full();
+        api.MapPost("/update/install", async () =>
+        {
+            try { await host.Updates.InstallAsync(); return Results.Ok(new { started = true }); }
+            catch (Exception ex) { return Error(ex.Message); }
+        }).Full();
+
         // ---------- app settings (full access) ----------
 
         api.MapGet("/settings", () => SettingsDto(mgr, host)).Full();
@@ -424,6 +434,11 @@ public static class Api
                 if (!remote) s.InternetAccess = false; // internet access rides on remote access
             }
             if (req.MinimizeToTray is bool tray) s.MinimizeToTray = tray;
+            if (req.CheckForUpdates is bool updates)
+            {
+                s.CheckForUpdates = updates;
+                if (updates && host.Updates.CheckedAt == null) _ = host.Updates.CheckAsync(); // turned on before the first check ran
+            }
             if (req.InternetAccess is bool internet)
             {
                 if (internet && !(req.RemoteAccess ?? s.RemoteAccess))
@@ -682,7 +697,24 @@ public static class Api
         lanUrls = NetworkInfo.LocalAddresses().Select(a => $"http://{a.Address}:{host.Port}"),
         dataDir = ServerManager.DataDir,
         version = typeof(Api).Assembly.GetName().Version?.ToString(3),
+        checkForUpdates = mgr.Settings.CheckForUpdates,
     };
+
+    /// <summary>Whether a newer Emberkeep is out, for the sidebar notice and App settings.</summary>
+    private static object UpdateDto(ServerManager mgr, WebHost host)
+    {
+        var u = host.Updates;
+        return new
+        {
+            enabled = mgr.Settings.CheckForUpdates,
+            current = UpdateChecker.CurrentVersion.ToString(),
+            latest = u.LatestVersion,
+            checkedAt = u.CheckedAt,
+            error = u.Error,
+            installing = u.Installing,
+            available = u.Available is { } a ? new { a.Version, a.Title, a.Notes, a.PageUrl, canInstall = a.InstallerUrl != null } : null,
+        };
+    }
 
     /// <summary>Accounts (never their password hashes), groups, the permission list and the servers groups can pick.</summary>
     private static object AccountsDto(ServerManager mgr, WebHost host) => new
@@ -723,7 +755,7 @@ public static class Api
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
-    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess);
+    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates);
     private sealed record ChangePasswordRequest(string? Current, string? Next);
     private sealed record NewUserRequest(string? Username, string? Password, string? GroupId);
     private sealed record UpdateUserRequest(string? GroupId, bool? Disabled, string? Password);
