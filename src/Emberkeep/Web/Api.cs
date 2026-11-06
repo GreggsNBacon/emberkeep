@@ -90,6 +90,7 @@ public static class Api
             if (string.IsNullOrWhiteSpace(body.Name)) return Error("The server needs a name.");
             next.Name = body.Name.Trim();
             next.AutoRestart = body.AutoRestart;
+            next.StartWithEmberkeep = body.StartWithEmberkeep;
             next.CommandChannel = body.CommandChannel;
             next.StopMethod = body.StopMethod;
             next.StopCommands = body.StopCommands ?? new();
@@ -442,6 +443,13 @@ public static class Api
             catch (Exception ex) { return Error(ex.Message); }
         }).Full();
 
+        // ---------- restart this PC (full access) ----------
+
+        api.MapGet("/pc/restart", () => PcRestartDto(host)).Full();
+        api.MapPost("/pc/restart", () => { host.PcRestart.RestartSoon(); return Results.Ok(PcRestartDto(host)); }).Full();
+        api.MapPost("/pc/restart/cancel", () =>
+            host.PcRestart.Cancel() ? Results.Ok(PcRestartDto(host)) : Error("It's too late to cancel: the servers are already being stopped.")).Full();
+
         // ---------- app settings (full access) ----------
 
         api.MapGet("/settings", () => SettingsDto(mgr, host)).Full();
@@ -464,6 +472,17 @@ public static class Api
                 if (!remote) s.InternetAccess = false; // internet access rides on remote access
             }
             if (req.MinimizeToTray is bool tray) s.MinimizeToTray = tray;
+            if (req.StartWithWindows is bool startup)
+            {
+                try { WindowsStartup.Set(startup); }
+                catch (Exception ex) { return Error("Couldn't change Windows startup: " + ex.Message); }
+            }
+            if (req.DailyRestartTime is string time)
+            {
+                if (!TimeOnly.TryParse(time, out var t)) return Error("Pick a time for the daily restart, like 05:00.");
+                s.DailyRestartTime = t.ToString("HH:mm");
+            }
+            if (req.DailyRestart is bool daily) s.DailyRestart = daily;
             if (req.CheckForUpdates is bool updates)
             {
                 s.CheckForUpdates = updates;
@@ -721,6 +740,11 @@ public static class Api
         listeningOnLan = host.ListeningOnLan,
         hasAccounts = host.Auth.HasAccounts,
         minimizeToTray = mgr.Settings.MinimizeToTray,
+        startWithWindows = WindowsStartup.Enabled,
+        startupOtherCopy = !WindowsStartup.Enabled && WindowsStartup.RegisteredCommand() != null,
+        dailyRestart = mgr.Settings.DailyRestart,
+        dailyRestartTime = mgr.Settings.DailyRestartTime,
+        pcRestart = PcRestartDto(host),
         internetAccess = mgr.Settings.InternetAccess,
         longPassword = host.Auth.AllPasswordsLong,
         minInternetPasswordLength = AuthService.MinInternetPasswordLength,
@@ -786,7 +810,21 @@ public static class Api
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
-    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates);
+    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates, bool? StartWithWindows,
+        bool? DailyRestart, string? DailyRestartTime);
+
+    private static object PcRestartDto(WebHost host)
+    {
+        var r = host.PcRestart;
+        var p = r.Pending;
+        return new
+        {
+            pending = p == null ? null : new { at = p.At.ToUniversalTime(), reason = p.Reason, stopping = p.Stopping,
+                secondsLeft = Math.Max(0, (int)Math.Ceiling((p.At - DateTime.Now).TotalSeconds)) },
+            nextDaily = r.NextDaily()?.ToUniversalTime(),
+            error = r.LastError,
+        };
+    }
     private sealed record ChangePasswordRequest(string? Current, string? Next);
     private sealed record NewUserRequest(string? Username, string? Password, string? GroupId);
     private sealed record UpdateUserRequest(string? GroupId, bool? Disabled, string? Password);

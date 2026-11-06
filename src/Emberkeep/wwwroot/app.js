@@ -1293,6 +1293,12 @@ function renderSettings() {
         ps.backend === 'watchfire' && state.me?.full ? h('button', { class: 'btn btn-small', type: 'button', onclick: openWatchfire }, 'Open Watchfire') : null)) : null,
     )));
 
+  const autoStartRow = () => row('Start with Emberkeep', (() => {
+    const cb = h('input', { type: 'checkbox', ...(c.startWithEmberkeep ? { checked: true } : {}) });
+    cb.addEventListener('change', () => c.startWithEmberkeep = cb.checked);
+    return h('div', { class: 'inline' }, h('span', { class: 'toggle' }, cb, h('span')),
+      h('span', { class: 'dim' }, 'Start this server when Emberkeep starts. With Start with Windows on (App settings), it starts after a reboot too.'));
+  })());
   const restartRow = () => row('Restart after a crash', (() => {
     const cb = h('input', { type: 'checkbox', ...(c.autoRestart ? { checked: true } : {}) });
     cb.addEventListener('change', () => c.autoRestart = cb.checked);
@@ -1304,7 +1310,7 @@ function renderSettings() {
       h('div', { class: 'notice', style: { margin: '0 0 12px' } }, 'The executable, launch arguments, folders and environment can only be changed by accounts with the "Change launch settings" permission, because they decide what runs on the host PC.'),
       h('div', { class: 'set-rows' },
         row('Executable', readOnly(d.resolvedExecutable || c.executable)),
-        restartRow())));
+        autoStartRow(), restartRow())));
   }
   const exeInput = text('executable', { mono: true });
   if (launchOk) form.append(h('section', { class: 'set-group' },
@@ -1335,6 +1341,7 @@ function renderSettings() {
         });
         return t;
       })()),
+      autoStartRow(),
       restartRow(),
     )));
 
@@ -1809,6 +1816,74 @@ async function refreshUpdateNote(u) {
       h('a', { class: 'btn btn-small btn-ghost', href: a.pageUrl, target: '_blank', rel: 'noopener' }, 'What\'s new')));
 }
 
+// ---------------- restart countdown (sidebar) ----------------
+
+let pcRestartTimer = null;
+// Shows "This PC restarts in 0:42" with Cancel while a restart is counting down.
+function showPcRestart(r) {
+  const el = $('#restartNote');
+  if (!el) return;
+  clearInterval(pcRestartTimer);
+  const p = r?.pending;
+  el.hidden = !p;
+  if (!p) { el.replaceChildren(); return; }
+  const at = Date.now() + p.secondsLeft * 1000;
+  const text = h('div', { class: 'restart-title' });
+  const cancel = h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
+    try { showPcRestart(await api('POST', '/api/pc/restart/cancel')); toast('The restart was cancelled.', 'good'); } catch (e) { toast(e.message, 'bad'); refreshPcRestart(); }
+  } }, p.reason === 'the daily restart' ? 'Skip today' : 'Cancel');
+  const tick = () => {
+    const left = Math.max(0, Math.round((at - Date.now()) / 1000));
+    if (p.stopping || left === 0) { text.textContent = 'Stopping the servers, then restarting this PC…'; cancel.hidden = true; return; }
+    text.textContent = `This PC restarts in ${Math.floor(left / 60)}:${String(left % 60).padStart(2, '0')}`;
+  };
+  el.replaceChildren(text, h('div', { class: 'dim', style: { fontSize: '12px', margin: '2px 0 8px' } },
+    p.reason === 'the daily restart' ? 'Daily restart. Servers are stopped first.' : 'Servers are stopped first.'), cancel);
+  tick();
+  pcRestartTimer = setInterval(tick, 1000);
+}
+async function refreshPcRestart() {
+  if (!state.me?.full) return;
+  try { showPcRestart(await api('GET', '/api/pc/restart')); } catch { }
+}
+
+// ---------------- web link for friends (sidebar) ----------------
+
+// The address friends open in a browser to reach Emberkeep (they sign in with an account you made for them).
+async function shareLinkMenu(anchor) {
+  let st;
+  try { st = await api('GET', '/api/settings'); } catch (e) { toast(e.message, 'bad'); return; }
+  const items = [];
+  if (!st.listeningOnLan) {
+    items.push({ label: 'Remote access is off', sub: 'Turn it on in App settings so friends can open Emberkeep in their browser.', disabled: true },
+      { label: 'Open App settings', onClick: () => appSettingsDialog() });
+    openMenu(anchor, items, { plain: true });
+    return;
+  }
+  try { await loadNetwork(true); } catch { }
+  const url = a => `http://${a}:${st.port}`;
+  const pick = (u, where) => copyText(u, `Copied ${u}. ${where}`);
+  const lan = (network.local || []).filter(a => a.kind === 'lan');
+  const vpn = (network.local || []).filter(a => a.kind === 'vpn');
+  const pub = st.forwarding?.externalIp || network.publicIp;
+  items.push({ heading: 'Friends over the internet' });
+  if (st.internetAccess && pub) items.push({ label: showIp(url(pub)), sub: "Your public address. Emberkeep's port is open on your router.",
+    onClick: () => pick(url(pub), 'Friends sign in with the account you made for them.') });
+  else items.push({ label: pub ? showIp(url(pub)) : 'Public address unavailable',
+    sub: st.internetAccess ? "Couldn't look up your public IP right now." : "Turn on Reach Emberkeep from the internet in App settings first, or friends can't connect.",
+    disabled: !pub || null, onClick: pub ? () => pick(url(pub), "Friends can only connect once Emberkeep's port is open on your router.") : undefined });
+  if (lan.length) {
+    items.push({ heading: 'People on your home network' });
+    for (const a of lan) items.push({ label: showIp(url(a.address)), sub: a.adapter + (a.primary ? ' (main connection)' : ''), onClick: () => pick(url(a.address), '') });
+  }
+  if (vpn.length) {
+    items.push({ heading: 'People on your VPN' });
+    for (const a of vpn) items.push({ label: showIp(url(a.address)), sub: a.adapter, onClick: () => pick(url(a.address), '') });
+  }
+  if (!st.hasAccounts) items.push('sep', { label: 'Make accounts for your friends', sub: 'Users & groups', onClick: () => usersDialog() });
+  openMenu(anchor, items);
+}
+
 function updateStatusText(u) {
   if (u.available) return `Emberkeep ${u.available.version} is available.`;
   if (u.error) return u.error;
@@ -1863,6 +1938,40 @@ async function appSettingsDialog() {
     const remote = h('input', { type: 'checkbox', ...(st.remoteAccess ? { checked: true } : {}) });
     const port = h('input', { class: 'input mono', type: 'number', min: 1024, max: 65535, value: st.configuredPort, style: { maxWidth: '140px' } });
     const tray = h('input', { type: 'checkbox', ...(st.minimizeToTray ? { checked: true } : {}) });
+    const startup = h('input', { type: 'checkbox', ...(st.startWithWindows ? { checked: true } : {}) });
+    startup.addEventListener('change', () => putSettings({ startWithWindows: startup.checked },
+      startup.checked ? 'Emberkeep will start with Windows.' : 'Emberkeep won\'t start with Windows.').catch(e => { startup.checked = !startup.checked; toast(e.message, 'bad'); }));
+
+    // Restart this PC: now (after a minute's countdown) or every day at a set time. Servers are stopped properly first.
+    const restartGroup = () => {
+      const daily = h('input', { type: 'checkbox', ...(st.dailyRestart ? { checked: true } : {}) });
+      const time = h('input', { class: 'input mono', type: 'time', value: st.dailyRestartTime, style: { maxWidth: '130px' } });
+      daily.addEventListener('change', () => putSettings({ dailyRestart: daily.checked, dailyRestartTime: time.value },
+        daily.checked ? `This PC will restart every day at ${time.value}.` : 'The daily restart is off.').catch(e => { daily.checked = !daily.checked; toast(e.message, 'bad'); }));
+      time.addEventListener('change', () => putSettings({ dailyRestartTime: time.value }, st.dailyRestart ? `This PC will restart every day at ${time.value}.` : 'Saved.')
+        .catch(e => toast(e.message, 'bad')));
+      const next = st.pcRestart?.nextDaily ? new Date(st.pcRestart.nextDaily) : null;
+      const nextText = next ? `On. Next restart: ${next.toLocaleString([], { weekday: 'long', hour: '2-digit', minute: '2-digit' })}.` : 'Off.';
+      return h('div', { class: 'set-group' },
+        h('h2', {}, 'Restart this PC'),
+        h('p', {}, 'Emberkeep stops every running server the normal way first, so worlds are saved, then restarts Windows. A restart can be cancelled until the servers start stopping.'),
+        !st.startWithWindows ? h('div', { class: 'notice warn', style: { margin: '0 0 12px' } },
+          'Turn on Start with Windows above, so Emberkeep and the servers set to Start with Emberkeep come back after the restart.') : null,
+        h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Restart now'),
+            h('div', {}, h('button', { class: 'btn btn-small', type: 'button', disabled: !!st.pcRestart?.pending || null, onclick: async () => {
+              if (!(await confirmDialog('Restart this PC?', 'In one minute Emberkeep stops all running servers, then Windows restarts. You can cancel during the minute.', { okText: 'Restart PC', danger: true }))) return;
+              try { const r = await api('POST', '/api/pc/restart'); showPcRestart(r); await redraw(); } catch (e) { toast(e.message, 'bad'); }
+            } }, st.pcRestart?.pending ? 'Restart under way' : 'Restart PC…'),
+              st.pcRestart?.error ? h('div', { class: 'help', style: { color: 'var(--bad-text)' } }, st.pcRestart.error) : null)),
+          h('div', { class: 'set-row' }, h('label', {}, 'Restart every day'),
+            h('div', {}, h('div', { class: 'inline' }, h('span', { class: 'toggle' }, daily, h('span')), h('span', { class: 'dim' }, 'at'), time,
+              h('span', { class: 'dim' }, nextText)),
+              h('div', { class: 'help' }, 'Keeps a long-running PC fresh, e.g. for Windows updates. You get a 5-minute warning in Emberkeep and can skip that day\'s restart.'))),
+          h('div', { class: 'set-row' }, h('label', {}, 'After the restart'),
+            h('div', { class: 'help', style: { marginTop: '7px' } },
+              'Windows starts programs like Emberkeep once someone signs in. If this PC has a password, it waits at the sign-in screen, so for a fully automatic restart turn on automatic sign-in for this PC (for example with Microsoft\'s Autologon tool).'))));
+    };
     remote.addEventListener('change', () => putSettings({ remoteAccess: remote.checked },
       remote.checked ? 'Remote access is on.' : 'Remote access is off.').catch(e => { remote.checked = !remote.checked; toast(e.message, 'bad'); }));
     tray.addEventListener('change', () => putSettings({ minimizeToTray: tray.checked }, 'Saved.').catch(e => { tray.checked = !tray.checked; toast(e.message, 'bad'); }));
@@ -2023,12 +2132,17 @@ async function appSettingsDialog() {
       portForwardGroup(),
       discordGroup(),
       h('div', { class: 'set-group' },
-        h('h2', {}, 'Window'),
+        h('h2', {}, 'Window and startup'),
         h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Start with Windows'),
+            h('div', {}, h('div', { class: 'inline' }, h('span', { class: 'toggle' }, startup, h('span')),
+              h('span', { class: 'dim' }, 'Open Emberkeep in the tray when you sign in to Windows. Servers set to Start with Emberkeep (in their Settings) start then too.')),
+              st.startupOtherCopy ? h('div', { class: 'help' }, 'Windows currently starts a different copy of Emberkeep. Turning this on switches it to this one.') : null)),
           h('div', { class: 'set-row' }, h('label', {}, 'Keep running in the tray'),
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, tray, h('span')), h('span', { class: 'dim' }, 'Closing the window while servers run hides Emberkeep in the tray instead of quitting'))),
           h('div', { class: 'set-row' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)),
         )),
+      restartGroup(),
       updatesGroup(),
     );
     remote.disabled = !st.hasAccounts;
@@ -2470,6 +2584,8 @@ function applyAccount() {
   const who = $('#whoami');
   who.replaceChildren(h('span', { class: 'who-dot' }), h('span', {}, me.isLocal ? 'On the host PC' : `Signed in as ${me.username}`));
   who.onclick = me.isLocal ? appSettingsDialog : accountDialog;
+  $('#shareLinkBtn').hidden = !me.full;
+  $('#shareLinkBtn').onclick = e => shareLinkMenu(e.currentTarget);
   who.title = me.isLocal ? 'App settings' : 'Your account: change your password or sign out';
 }
 
@@ -2495,6 +2611,9 @@ async function init() {
   refreshUpdateNote();
   setTimeout(() => refreshUpdateNote(), 30000);
   setInterval(() => refreshUpdateNote(), 30 * 60000);
+  // A restart can also be started from another device, or by the daily restart: look every 15 s.
+  refreshPcRestart();
+  setInterval(() => refreshPcRestart(), 15000);
   if (hash.get('dialog') === 'add') addServerDialog(hash.get('addtab') || 'scan');
   if (hash.get('dialog') === 'settings') appSettingsDialog();
 }

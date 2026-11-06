@@ -663,3 +663,13 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 /* Sign-in page: an old desktop link was opened */
 .login .expired-note { display: block; margin: 0 0 16px; line-height: 1.45; }
 .login .expired-note[hidden] { display: none; }
+/* Sidebar: "On the host PC" with the web-link button beside it */
+.who-row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.who-row .whoami { flex: 1; min-width: 0; margin-top: 0; }
+.share-link { width: 30px; height: 30px; flex: none; }
+.share-link[hidden] { display: none; }
+/* Sidebar countdown while this PC is about to restart */
+.restart-note { border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--rope)); background: color-mix(in srgb, var(--warn) 10%, var(--hull));
+  border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; color: var(--warn-text); }
+.restart-note[hidden] { display: none; }
+.restart-title { font-weight: 600; font-variant-numeric: tabular-nums; }

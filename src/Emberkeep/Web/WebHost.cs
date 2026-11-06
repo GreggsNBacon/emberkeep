@@ -29,7 +29,11 @@ public sealed class WebHost
         Discord = new DiscordBot(mgr);
         Learn = new LauncherLearn(mgr);
         Updates = new UpdateChecker(mgr);
+        PcRestart = new PcRestart(mgr);
     }
+
+    /// <summary>"Restart PC now" and the daily restart.</summary>
+    public PcRestart PcRestart { get; }
 
     /// <summary>Looks for a newer Emberkeep on GitHub.</summary>
     public UpdateChecker Updates { get; }
@@ -75,6 +79,7 @@ public sealed class WebHost
                 ApplyForwarding();
                 Discord.Start();
                 Updates.Start();
+                PcRestart.Start();
                 _ = Task.Run(() => ArtCache.AutoDetectAsync(_mgr)); // once per run: art for custom servers that have none
                 return;
             }

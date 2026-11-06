@@ -87,6 +87,20 @@ public sealed class ServerManager : IDisposable
         return rt;
     }
 
+    /// <summary>
+    /// Starts the servers set to "Start with Emberkeep" that aren't already running (one that was still running is picked up
+    /// instead). A few seconds apart, so they don't all load at once.
+    /// </summary>
+    public async Task StartAutoServersAsync()
+    {
+        foreach (var rt in Runtimes.Where(r => r.Config.StartWithEmberkeep && r.State == ServerState.Stopped).ToList())
+        {
+            rt.Logs.Add("system", "Starting with Emberkeep (Start with Emberkeep is on).");
+            await rt.StartAsync();
+            await Task.Delay(3000);
+        }
+    }
+
     public IEnumerable<ServerRuntime> Runtimes => Settings.Servers.Select(s => _runtimes[s.Id]);
 
     public ServerRuntime? Get(string id) => _runtimes.GetValueOrDefault(id);

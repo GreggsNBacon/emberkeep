@@ -70,6 +70,11 @@
                 Target="[WATCHFIREFOLDER]Watchfire.exe" WorkingDirectory="WATCHFIREFOLDER" />
       <RegistryValue Root="HKCU" Key="Software\Emberkeep" Name="WatchfireShortcut" Type="integer" Value="1" KeyPath="yes" />
     </Component>
+    <Component Id="WatchfireDesktopShortcut" Directory="DesktopFolder" Guid="6A0E2C4D-8B71-4F3E-9D52-1C7B3E8F04A9" Condition="INSTALLDESKTOPSHORTCUT = 1">
+      <Shortcut Id="DesktopWatchfire" Name="Watchfire" Description="Open ports on your router for game servers"
+                Target="[WATCHFIREFOLDER]Watchfire.exe" WorkingDirectory="WATCHFIREFOLDER" />
+      <RegistryValue Root="HKCU" Key="Software\Emberkeep" Name="WatchfireDesktopShortcut" Type="integer" Value="1" KeyPath="yes" />
+    </Component>
 
     <!-- Two independent features: install either app on its own, or both. The choice page below shows them as tickboxes;
          silent installs can pick with ADDLOCAL=Emberkeep, ADDLOCAL=Watchfire or ADDLOCAL=ALL. -->
@@ -81,6 +86,7 @@
     <Feature Id="Watchfire" Title="Watchfire" Description="Open ports on your router for game servers." AllowAbsent="yes">
       <ComponentRef Id="WatchfireExeComponent" />
       <ComponentRef Id="WatchfireShortcut" />
+      <ComponentRef Id="WatchfireDesktopShortcut" />
     </Feature>
 
     <!-- Tickbox defaults: both on a fresh install; on an upgrade, whatever is installed now. -->

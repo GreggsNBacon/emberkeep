@@ -48,6 +48,8 @@ internal static class Program
             return;
         }
 
+        _ = Task.Run(mgr.StartAutoServersAsync);
+
         bool startHidden = Array.Exists(args, a => a.Equals("--minimized", StringComparison.OrdinalIgnoreCase));
         using var form = new MainForm(mgr, host, startHidden);
         Application.Run(form);

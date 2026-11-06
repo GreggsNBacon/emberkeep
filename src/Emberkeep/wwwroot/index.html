@@ -20,10 +20,16 @@
     </div>
     <nav class="server-list" id="serverList" aria-label="Servers"></nav>
     <div class="sidebar-foot">
+      <div class="restart-note" id="restartNote" hidden></div>
       <div class="update-note" id="updateNote" hidden></div>
       <button class="btn btn-primary wide" id="addServerBtn" type="button">Add server</button>
       <button class="btn btn-ghost wide" id="appSettingsBtn" type="button">App settings</button>
-      <button class="whoami" id="whoami" type="button" title="Your account"></button>
+      <div class="who-row">
+        <button class="whoami" id="whoami" type="button" title="Your account"></button>
+        <button class="btn btn-icon share-link" id="shareLinkBtn" type="button" title="Copy the web link for friends" aria-label="Copy the web link for friends" aria-haspopup="menu" hidden>
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M8.5 11.5a3.2 3.2 0 0 0 4.6 0l2.6-2.6a3.2 3.2 0 0 0-4.6-4.6l-1 1M11.5 8.5a3.2 3.2 0 0 0-4.6 0l-2.6 2.6a3.2 3.2 0 0 0 4.6 4.6l1-1" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>
+        </button>
+      </div>
     </div>
   </aside>
 
