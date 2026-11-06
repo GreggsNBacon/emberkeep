@@ -1,5 +1,5 @@
 <Project Sdk="WixToolset.Sdk/6.0.2">
-  <!-- Builds Emberkeep-Setup.msi from the single-file exe in ..\publish (run ..\build.ps1). -->
+  <!-- Builds the installer from the single-file exe in ..\publish (run ..\build.ps1, which names it Emberkeep-<version>-Setup.msi). -->
   <PropertyGroup>
     <OutputName>Emberkeep-Setup</OutputName>
     <Platform>x64</Platform>
