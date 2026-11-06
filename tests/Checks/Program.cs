@@ -1,4 +1,4 @@
-using Hostbay.Core;
+using Emberkeep.Core;
 
 int failed = 0, passed = 0;
 void Check(string what, string actual, string expected)
@@ -93,8 +93,8 @@ Check("ACE blobs found", string.Join(",", blobs.Select(b => $"{b.Flag}:{b.Encodi
 Check("ACE config decodes exactly", (blobs[0].Json == aceCfg).ToString(), "True");
 Check("our encoding = launcher's encoding (decoded)", ArgBlobs.TryDecode(ArgBlobs.Encode("zlib-len", aceCfg), out var e2, out var j2) && j2 == aceCfg ? e2 : "mismatch", "zlib-len");
 var (newArgs, files) = ArgBlobs.Extract(cmd);
-Check("extracted arguments", newArgs, @"-serverconfig {file:HostbayConfig\serverconfig.json|zlib-len} -seasondefinition {file:HostbayConfig\seasondefinition.json|zlib-len}");
-Check("extracted files", string.Join(", ", files.Select(f => f.RelPath)), @"HostbayConfig\serverconfig.json, HostbayConfig\seasondefinition.json");
+Check("extracted arguments", newArgs, @"-serverconfig {file:EmberkeepConfig\serverconfig.json|zlib-len} -seasondefinition {file:EmberkeepConfig\seasondefinition.json|zlib-len}");
+Check("extracted files", string.Join(", ", files.Select(f => f.RelPath)), @"EmberkeepConfig\serverconfig.json, EmberkeepConfig\seasondefinition.json");
 var aceDir = Path.Combine(Path.GetTempPath(), "hb-ace-" + Guid.NewGuid().ToString("N")[..6]);
 foreach (var (rel, json) in files) { Directory.CreateDirectory(Path.Combine(aceDir, Path.GetDirectoryName(rel)!)); File.WriteAllText(Path.Combine(aceDir, rel), json); }
 var expanded = ArgBlobs.Expand(newArgs, aceDir);
@@ -106,7 +106,7 @@ Ports("ACE router ports from serverconfig.json", aceServer, "TCP 9705, UDP 9706"
 Check("ACE config files listed", string.Join(", ", ConfigDiscovery.Discover(aceServer).Where(f => f.Known).Select(f => Path.GetFileName(f.Path))), "serverconfig.json, seasondefinition.json");
 File.WriteAllText(Path.Combine(aceDir, files[1].RelPath), "{ broken");
 try { ArgBlobs.Expand(newArgs, aceDir); Check("broken JSON refused", "started", "refused"); }
-catch (InvalidOperationException ex) { Check("broken JSON refused", ex.Message.StartsWith(@"HostbayConfig\seasondefinition.json isn't valid JSON") ? "refused" : ex.Message, "refused"); }
+catch (InvalidOperationException ex) { Check("broken JSON refused", ex.Message.StartsWith(@"EmberkeepConfig\seasondefinition.json isn't valid JSON") ? "refused" : ex.Message, "refused"); }
 foreach (var (raw, encoding) in new[] { ("{\"a\":1,\"name\":\"plain base64 json\"}", "base64"), ("{\"a\":2,\"name\":\"zlib json here\"}", "zlib"), ("{\"a\":3,\"name\":\"gzip json here\"}", "gzip") })
     Check($"{encoding} round trip", ArgBlobs.TryDecode(ArgBlobs.Encode(encoding, raw), out var en, out var js) && js == raw ? en : "fail", encoding);
 Check("ordinary arguments untouched", ArgBlobs.Find("-batchmode -port 2456 -name \"My Server\" -password SuperSecretWord123456789").Count.ToString(), "0");

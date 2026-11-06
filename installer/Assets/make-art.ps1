@@ -27,7 +27,7 @@ $g.FillRectangle((New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::
 Logo $g 46 92 72
 $f = New-Object System.Drawing.Font 'Segoe UI Semibold', 15
 $fmt = New-Object System.Drawing.StringFormat; $fmt.Alignment = 'Center'
-$g.DrawString('Hostbay', $f, (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(223,230,240))), (New-Object System.Drawing.RectangleF 0, 176, 164, 30), $fmt)
+$g.DrawString('Emberkeep', $f, (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(223,230,240))), (New-Object System.Drawing.RectangleF 0, 176, 164, 30), $fmt)
 $f2 = New-Object System.Drawing.Font 'Segoe UI', 8.5
 $g.DrawString('Game server manager', $f2, (New-Object System.Drawing.SolidBrush ([System.Drawing.Color]::FromArgb(141,154,176))), (New-Object System.Drawing.RectangleF 0, 204, 164, 20), $fmt)
 $g.Dispose(); $bmp.Save((Join-Path $Dir 'Dialog.bmp'), [System.Drawing.Imaging.ImageFormat]::Bmp); $bmp.Dispose()

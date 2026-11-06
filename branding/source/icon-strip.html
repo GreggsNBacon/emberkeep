@@ -1,0 +1,12 @@
+<!doctype html>
+<!-- Every icon size side by side at its exact pixel size, so each is rasterised crisply (no downscaling).
+     ?logo=emberkeep or ?logo=watchfire. build-icons.ps1 crops them apart: x offsets are the running sum of size + 8. -->
+<html><head><meta charset="utf-8"><style>html,body{margin:0;background:transparent}img{position:absolute;top:0}</style></head>
+<body><script>
+const logo = new URLSearchParams(location.search).get('logo') || 'emberkeep';
+let x = 0;
+for (const s of [256, 128, 64, 48, 40, 32, 24, 20, 16]) {
+  const i = document.createElement('img'); i.src = logo + '.svg'; i.width = s; i.height = s; i.style.left = x + 'px';
+  document.body.append(i); x += s + 8;
+}
+</script></body></html>

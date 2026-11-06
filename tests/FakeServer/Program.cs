@@ -1,4 +1,4 @@
-// A stand-in game server for testing Hostbay: logs to stdout and a file, reads commands
+// A stand-in game server for testing Emberkeep: logs to stdout and a file, reads commands
 // from stdin, saves on Ctrl+C, and answers Source RCON on the port given by --rcon=<port>.
 using System.Net;
 using System.Net.Sockets;

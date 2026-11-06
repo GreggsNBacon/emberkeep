@@ -1,6 +1,6 @@
 <Project Sdk="Microsoft.NET.Sdk">
   <!-- A stand-in for a game's own "Server Launcher": a windowed program that starts the server with its settings
-       encoded on the command line, like Assetto Corsa EVO's. Used to test Hostbay's Learn from launcher. -->
+       encoded on the command line, like Assetto Corsa EVO's. Used to test Emberkeep's Learn from launcher. -->
   <PropertyGroup>
     <OutputType>WinExe</OutputType>
     <TargetFramework>net10.0</TargetFramework>

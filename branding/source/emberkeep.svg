@@ -1,0 +1,12 @@
+<svg xmlns="http://www.w3.org/2000/svg" viewBox="0 0 64 64">
+  <!-- Emberkeep: an ember flame with a server rack cut out of it. -->
+  <defs>
+    <linearGradient id="ek-g" x1="0" y1="0" x2="0" y2="1"><stop offset="0" stop-color="#ffb347"/><stop offset=".55" stop-color="#ff6a2b"/><stop offset="1" stop-color="#d32f3f"/></linearGradient>
+    <mask id="ek-m" maskUnits="userSpaceOnUse" x="0" y="0" width="64" height="64">
+      <path fill="#fff" d="M32 2C39 12 53 21 53 39C53 52 44 62 32 62C20 62 11 52 11 39C11 30 16 24 20 17C21.5 24 24.5 27.5 27.5 28.5C25.5 20 26.5 10 32 2Z"/>
+      <rect x="21" y="31" width="22" height="7" rx="2" fill="#000"/><rect x="21" y="40" width="22" height="7" rx="2" fill="#000"/><rect x="21" y="49" width="22" height="7" rx="2" fill="#000"/>
+      <circle cx="25" cy="34.5" r="1.4" fill="#fff"/><circle cx="25" cy="43.5" r="1.4" fill="#fff"/><circle cx="25" cy="52.5" r="1.4" fill="#fff"/>
+    </mask>
+  </defs>
+  <rect width="64" height="64" fill="url(#ek-g)" mask="url(#ek-m)"/>
+</svg>
