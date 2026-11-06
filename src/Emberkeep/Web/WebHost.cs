@@ -5,6 +5,7 @@ using System.Net;
 using System.Net.NetworkInformation;
 using System.Net.Sockets;
 using System.Reflection;
+using System.Threading;
 using System.Threading.Tasks;
 using Emberkeep.Core;
 using Microsoft.AspNetCore.Builder;
@@ -31,7 +32,17 @@ public sealed class WebHost
         Updates = new UpdateChecker(mgr);
         PcRestart = new PcRestart(mgr);
         Installer = new ServerInstaller(mgr);
+        Backups = new BackupService(mgr);
+        Scheduler = new Scheduler(mgr, Backups, Installer);
+        Notifier = new Notifier(mgr);
     }
+
+    /// <summary>Server backups (Backups tab).</summary>
+    public BackupService Backups { get; }
+    /// <summary>Scheduled restarts, backups, commands… (Schedule tab).</summary>
+    public Scheduler Scheduler { get; }
+    /// <summary>Windows and Discord notifications about activity.</summary>
+    public Notifier Notifier { get; }
 
     /// <summary>Installs and updates servers with SteamCMD.</summary>
     public ServerInstaller Installer { get; }
@@ -84,6 +95,8 @@ public sealed class WebHost
                 Discord.Start();
                 Updates.Start();
                 PcRestart.Start();
+                Scheduler.Start();
+                StartPlayerPolling();
                 _ = Task.Run(() => ArtCache.AutoDetectAsync(_mgr)); // once per run: art for custom servers that have none
                 return;
             }
@@ -108,6 +121,24 @@ public sealed class WebHost
             return answer == _instanceId;
         }
         catch { return false; }
+    }
+
+    private int _polling;
+    /// <summary>Games that answer a player-list query (Palworld's ShowPlayers): ask every 45 seconds while running.</summary>
+    private void StartPlayerPolling()
+    {
+        if (Interlocked.Exchange(ref _polling, 1) == 1) return;
+        _ = Task.Run(async () =>
+        {
+            while (true)
+            {
+                foreach (var rt in _mgr.Runtimes.Where(r => r.State == ServerState.Running).ToList())
+                    if (GameExtras.For(rt.Config.GameId).PlayersQuery is { } q)
+                        try { if (await rt.QueryQuietAsync(q) is { } reply && rt.Config.GameId == "palworld") rt.Players.SetFromPalworld(reply); }
+                        catch { }
+                await Task.Delay(TimeSpan.FromSeconds(45));
+            }
+        });
     }
 
     public async Task RestartAsync()

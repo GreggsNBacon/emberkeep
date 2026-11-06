@@ -49,6 +49,11 @@ public sealed class MainForm : Form
         menu.Items.Add("Exit", null, (_, _) => ExitApp());
         _tray = new NotifyIcon { Icon = Icon, Text = "Emberkeep", Visible = true, ContextMenuStrip = menu };
         _tray.DoubleClick += (_, _) => ShowFromTray();
+        // Notifications (App settings → Notifications) appear from the tray icon.
+        host.Notifier.Windows += (title, text, bad) =>
+        {
+            try { BeginInvoke(() => _tray.ShowBalloonTip(6000, title, text, bad ? ToolTipIcon.Warning : ToolTipIcon.Info)); } catch { }
+        };
 
         // A second launch of Emberkeep signals this event instead of starting another copy.
         _showSignal = new EventWaitHandle(false, EventResetMode.AutoReset, Program.ShowEventName);

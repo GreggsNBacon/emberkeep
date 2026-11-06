@@ -2,6 +2,7 @@ using System;
 using System.Collections.Generic;
 using System.IO;
 using System.Linq;
+using System.Text.Json;
 using System.Threading;
 using System.Threading.Tasks;
 
@@ -29,6 +30,8 @@ public sealed class InstallJob
     public DateTime StartedAt { get; } = DateTime.UtcNow;
     public DateTime? FinishedAt { get; set; }
     internal CancellationTokenSource Cts { get; } = new();
+    /// <summary>Completes when the job finishes, however it ends.</summary>
+    internal TaskCompletionSource Completion { get; } = new(TaskCreationOptions.RunContinuationsAsynchronously);
     internal bool CreatedDir { get; set; }
     public bool Finished => State is InstallState.Done or InstallState.Failed or InstallState.Cancelled;
 }
@@ -93,6 +96,78 @@ public sealed class ServerInstaller
         var job = new InstallJob { Kind = "update", AppId = appId, Title = rt.Config.Name, Dir = rt.Config.InstallDir, ServerId = rt.Config.Id };
         Enqueue(job);
         return job;
+    }
+
+    /// <summary>
+    /// Starts the server, first downloading any update when it's a SteamCMD server with Update before start on.
+    /// Returns once the server has been asked to start (or the update failed, which leaves it stopped).
+    /// </summary>
+    public async Task StartAsync(ServerRuntime rt)
+    {
+        if (rt.Config.UpdateBeforeStart && rt.Config.SteamCmdAppId != null && rt.State == ServerState.Stopped)
+        {
+            var job = Update(rt);
+            await job.Completion.Task;
+            if (job.State != InstallState.Done) { rt.Logs.Add("error", "Not starting: the update didn't finish."); return; }
+        }
+        await rt.StartAsync();
+    }
+
+    /// <summary>"Duplicate" with files: copies the server's folder to <paramref name="dir"/>, then adds it with the same settings.</summary>
+    public InstallJob Copy(ServerRuntime rt, string dir, string name)
+    {
+        if (!Path.IsPathFullyQualified(dir)) throw new InvalidOperationException("Choose a full folder path.");
+        if (Directory.Exists(dir) && Directory.EnumerateFileSystemEntries(dir).Any()) throw new InvalidOperationException("That folder isn't empty. Choose a new or empty folder.");
+        var src = Path.GetFullPath(rt.Config.InstallDir).TrimEnd(Path.DirectorySeparatorChar);
+        if (Path.GetFullPath(dir).StartsWith(src + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) throw new InvalidOperationException("The copy can't go inside the server's own folder.");
+        var job = new InstallJob { Kind = "copy", AppId = rt.Config.SteamCmdAppId ?? 0, Title = name, Dir = dir, Name = name, ServerId = null };
+        lock (_jobs) _jobs.Add(job);
+        _ = Task.Run(() => CopyAsync(job, rt.Config));
+        return job;
+    }
+
+    private async Task CopyAsync(InstallJob job, ServerInstance source)
+    {
+        var ct = job.Cts.Token;
+        try
+        {
+            var src = Path.GetFullPath(source.InstallDir);
+            var files = Directory.EnumerateFiles(src, "*", SearchOption.AllDirectories).ToList();
+            job.BytesTotal = files.Sum(f => { try { return new FileInfo(f).Length; } catch { return 0L; } });
+            job.State = InstallState.Downloading; job.Message = "Copying";
+            Directory.CreateDirectory(job.Dir); job.CreatedDir = true;
+            var buf = new byte[1 << 20];
+            foreach (var f in files)
+            {
+                ct.ThrowIfCancellationRequested();
+                var target = Path.Combine(job.Dir, Path.GetRelativePath(src, f));
+                Directory.CreateDirectory(Path.GetDirectoryName(target)!);
+                await using (var i = new FileStream(f, FileMode.Open, FileAccess.Read, FileShare.ReadWrite))
+                await using (var o = File.Create(target))
+                {
+                    int n;
+                    while ((n = await i.ReadAsync(buf, ct)) > 0) { await o.WriteAsync(buf.AsMemory(0, n), ct); job.BytesDone += n; }
+                }
+                File.SetLastWriteTime(target, File.GetLastWriteTime(f));
+                if (job.BytesTotal > 0) job.Percent = 100.0 * job.BytesDone / job.BytesTotal;
+            }
+            var copy = JsonSerializer.Deserialize<ServerInstance>(JsonSerializer.Serialize(source, ServerManager.Json), ServerManager.Json)!;
+            copy.Id = Guid.NewGuid().ToString("N")[..12];
+            copy.Name = job.Name ?? source.Name + " (copy)";
+            copy.InstallDir = job.Dir;
+            copy.AddedAt = DateTime.UtcNow;
+            foreach (var t in copy.Schedules) { t.Id = Guid.NewGuid().ToString("N")[..8]; t.LastRun = null; t.LastResult = null; }
+            // Paths inside the old folder move to the new one.
+            if (Path.IsPathRooted(copy.Executable) && copy.Executable.StartsWith(src, StringComparison.OrdinalIgnoreCase))
+                copy.Executable = Path.Combine(job.Dir, Path.GetRelativePath(src, copy.Executable));
+            _mgr.Add(copy);
+            job.ServerId = copy.Id;
+            job.State = InstallState.Done; job.Percent = 100; job.Message = "Copied and added.";
+            _mgr.Activity.Add("install", $"Added as a copy of {source.Name}, with its files.", copy, null, "good");
+        }
+        catch (OperationCanceledException) { job.State = InstallState.Cancelled; job.Message = "Cancelled."; TryDelete(job.Dir); }
+        catch (Exception ex) { job.State = InstallState.Failed; job.Error = ex.Message; job.Message = "Failed."; if (job.CreatedDir) TryDelete(job.Dir); }
+        finally { job.FinishedAt = DateTime.UtcNow; job.Completion.TrySetResult(); }
     }
 
     public bool Cancel(string id)
@@ -216,7 +291,15 @@ public sealed class ServerInstaller
             log?.Add("system", "Updating failed: " + ex.Message);
             if (job.Kind == "install" && job.CreatedDir) TryDelete(job.Dir);
         }
-        finally { job.FinishedAt = DateTime.UtcNow; }
+        finally
+        {
+            job.FinishedAt = DateTime.UtcNow;
+            job.Completion.TrySetResult();
+            if (job.State is InstallState.Done or InstallState.Failed && job.ServerId != null && _mgr.Get(job.ServerId) is { } srv)
+                _mgr.Activity.Add(job.Kind == "install" ? "install" : "update",
+                    job.State == InstallState.Done ? (job.Kind == "install" ? "Installed with SteamCMD." : "Server files updated.") : $"{(job.Kind == "install" ? "Installing" : "Updating")} failed: {job.Error}",
+                    srv.Config, null, job.State == InstallState.Done ? "good" : "bad");
+        }
     }
 
     private void AddServer(InstallJob job)

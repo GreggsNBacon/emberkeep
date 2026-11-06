@@ -14,6 +14,9 @@ public sealed class LogBuffer
     private readonly List<Channel<LogLine>> _subs = new();
     private long _seq;
 
+    /// <summary>Raised for every line (after it's stored), e.g. to spot players joining.</summary>
+    public event Action<LogLine>? LineAdded;
+
     public void Add(string source, string? text)
     {
         if (text == null) return;
@@ -29,6 +32,7 @@ public sealed class LogBuffer
             subs = _subs.ToArray();
         }
         foreach (var s in subs) s.Writer.TryWrite(line);
+        try { LineAdded?.Invoke(line); } catch { }
     }
 
     public (LogLine[] Backlog, Channel<LogLine> Channel) Subscribe(int backlog = 1000)
