@@ -98,7 +98,7 @@ public static class WatchfireClient
         if (await RunningAsync() is { } r) return r.Port;
         var exe = FindExe();
         if (exe == null) return null;
-        try { Process.Start(new ProcessStartInfo(exe, "--background") { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! }); }
+        try { Process.Start(StartInfo(exe, "--background")); }
         catch { return null; }
         for (int i = 0; i < 40; i++) // up to 20 s: first launch of the packaged exe unpacks itself
         {
@@ -114,8 +114,20 @@ public static class WatchfireClient
         if (await RunningAsync() is { } r) { await PostAsync(r.Port, "/api/show", new { }); return true; }
         var exe = FindExe();
         if (exe == null) return false;
-        Process.Start(new ProcessStartInfo(exe) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! });
+        Process.Start(StartInfo(exe, ""));
         return true;
+    }
+
+    /// <summary>
+    /// How to start Watchfire. When Emberkeep is pointed at a test router (EMBERKEEP_TEST_GATEWAY), the Watchfire it starts
+    /// gets the same router, so a test can never reach the real one through Watchfire.
+    /// </summary>
+    private static ProcessStartInfo StartInfo(string exe, string args)
+    {
+        var psi = new ProcessStartInfo(exe, args) { UseShellExecute = false, WorkingDirectory = Path.GetDirectoryName(exe)! };
+        if (AppEnv.Get("TEST_GATEWAY") is { Length: > 0 } gw && string.IsNullOrEmpty(Environment.GetEnvironmentVariable("WATCHFIRE_TEST_GATEWAY")))
+            psi.Environment["WATCHFIRE_TEST_GATEWAY"] = gw;
+        return psi;
     }
 
     public static async Task<WatchfireForwarded?> ForwardedAsync()
