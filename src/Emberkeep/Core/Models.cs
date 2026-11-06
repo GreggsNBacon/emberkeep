@@ -34,6 +34,8 @@ public sealed class ServerInstance
     public string Launcher { get; set; } = "";
     public Dictionary<string, string> Environment { get; set; } = new();
     public bool AutoRestart { get; set; }
+    /// <summary>Start this server when Emberkeep starts (e.g. after Windows starts, with Start with Windows on).</summary>
+    public bool StartWithEmberkeep { get; set; }
     public CommandChannel CommandChannel { get; set; } = CommandChannel.None;
     public StopMethod StopMethod { get; set; } = StopMethod.CtrlC;
     /// <summary>Commands sent (in order) when <see cref="StopMethod"/> is Commands, e.g. "save-all", "stop".</summary>
@@ -75,6 +77,10 @@ public sealed class AppSettings
     public bool NamesTidied { get; set; }
     /// <summary>Look for a newer Emberkeep on GitHub (on start and every 12 hours).</summary>
     public bool CheckForUpdates { get; set; } = true;
+    /// <summary>Restart this PC every day at <see cref="DailyRestartTime"/>, stopping the servers first.</summary>
+    public bool DailyRestart { get; set; }
+    /// <summary>Local time of day, "HH:mm".</summary>
+    public string DailyRestartTime { get; set; } = "05:00";
 }
 
 public sealed record LogLine(long Seq, DateTime Time, string Source, string Text);

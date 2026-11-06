@@ -90,6 +90,7 @@ public static class Api
             if (string.IsNullOrWhiteSpace(body.Name)) return Error("The server needs a name.");
             next.Name = body.Name.Trim();
             next.AutoRestart = body.AutoRestart;
+            next.StartWithEmberkeep = body.StartWithEmberkeep;
             next.CommandChannel = body.CommandChannel;
             next.StopMethod = body.StopMethod;
             next.StopCommands = body.StopCommands ?? new();
@@ -143,6 +144,36 @@ public static class Api
         api.MapDelete("/servers/{id}", (string id) =>
         {
             try { mgr.Remove(id); host.Auth.ForgetServer(id); mgr.Save(); return Results.Ok(); }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+        }).Need(Permissions.Launch);
+
+        // "Browse files": open the server's folder in File Explorer. Only from this PC: from anywhere else it would open
+        // a window on the host where nobody is looking.
+        api.MapPost("/servers/{id}/browse", (string id, HttpContext ctx) =>
+        {
+            var rt = mgr.Get(id);
+            if (rt == null) return Results.NotFound();
+            var remote = ctx.Connection.RemoteIpAddress;
+            if (remote == null || !System.Net.IPAddress.IsLoopback(remote)) return Error("Browse files only works on the PC that runs Emberkeep.");
+            var dir = rt.Config.InstallDir;
+            if (!Directory.Exists(dir)) return Error($"The server folder can't be found: {dir}");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true });
+            return Results.Ok();
+        }).See();
+
+        // "Check files again": look at the folder afresh, e.g. after the server finished downloading.
+        api.MapPost("/servers/{id}/recheck", (string id, HttpContext ctx) =>
+        {
+            var rt = mgr.Get(id);
+            if (rt == null) return Results.NotFound();
+            if (rt.State != ServerState.Stopped) return Error("Stop the server before checking its files again.");
+            try
+            {
+                var (next, changes) = ServerRecheck.Run(rt);
+                if (changes.Count > 0) mgr.Update(id, next);
+                _ = ArtCache.AutoDetectAsync(mgr, id); // a newly recognised game may now have artwork
+                return Results.Ok(new { changes, executableFound = ServerRecheck.ExecutableFound(rt), detail = Detail(rt, WebHost.Who(ctx)) });
+            }
             catch (InvalidOperationException ex) { return Error(ex.Message); }
         }).Need(Permissions.Launch);
 
@@ -412,6 +443,13 @@ public static class Api
             catch (Exception ex) { return Error(ex.Message); }
         }).Full();
 
+        // ---------- restart this PC (full access) ----------
+
+        api.MapGet("/pc/restart", () => PcRestartDto(host)).Full();
+        api.MapPost("/pc/restart", () => { host.PcRestart.RestartSoon(); return Results.Ok(PcRestartDto(host)); }).Full();
+        api.MapPost("/pc/restart/cancel", () =>
+            host.PcRestart.Cancel() ? Results.Ok(PcRestartDto(host)) : Error("It's too late to cancel: the servers are already being stopped.")).Full();
+
         // ---------- app settings (full access) ----------
 
         api.MapGet("/settings", () => SettingsDto(mgr, host)).Full();
@@ -434,6 +472,17 @@ public static class Api
                 if (!remote) s.InternetAccess = false; // internet access rides on remote access
             }
             if (req.MinimizeToTray is bool tray) s.MinimizeToTray = tray;
+            if (req.StartWithWindows is bool startup)
+            {
+                try { WindowsStartup.Set(startup); }
+                catch (Exception ex) { return Error("Couldn't change Windows startup: " + ex.Message); }
+            }
+            if (req.DailyRestartTime is string time)
+            {
+                if (!TimeOnly.TryParse(time, out var t)) return Error("Pick a time for the daily restart, like 05:00.");
+                s.DailyRestartTime = t.ToString("HH:mm");
+            }
+            if (req.DailyRestart is bool daily) s.DailyRestart = daily;
             if (req.CheckForUpdates is bool updates)
             {
                 s.CheckForUpdates = updates;
@@ -672,6 +721,7 @@ public static class Api
             resolvedExecutable = canSettings ? rt.ResolveExecutable() : null,
             resolvedWorkingDirectory = canSettings ? rt.ResolveWorkingDirectory() : null,
             installDirExists = Directory.Exists(rt.Config.InstallDir),
+            executableFound = ServerRecheck.ExecutableFound(rt),
             remoteConsole = rc == null ? null : new { rc.Host, rc.Port, hasPassword = rc.Password.Length > 0 },
             logFiles = canLaunch ? rt.LogFilePatterns() : Enumerable.Empty<string>(),
             join = JoinInfo.Resolve(rt.Config),
@@ -690,6 +740,11 @@ public static class Api
         listeningOnLan = host.ListeningOnLan,
         hasAccounts = host.Auth.HasAccounts,
         minimizeToTray = mgr.Settings.MinimizeToTray,
+        startWithWindows = WindowsStartup.Enabled,
+        startupOtherCopy = !WindowsStartup.Enabled && WindowsStartup.RegisteredCommand() != null,
+        dailyRestart = mgr.Settings.DailyRestart,
+        dailyRestartTime = mgr.Settings.DailyRestartTime,
+        pcRestart = PcRestartDto(host),
         internetAccess = mgr.Settings.InternetAccess,
         longPassword = host.Auth.AllPasswordsLong,
         minInternetPasswordLength = AuthService.MinInternetPasswordLength,
@@ -755,7 +810,21 @@ public static class Api
     private sealed record CreateServerRequest(string? GameId, string? InstallDir, string? Name, int? SteamAppId);
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
-    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates);
+    private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates, bool? StartWithWindows,
+        bool? DailyRestart, string? DailyRestartTime);
+
+    private static object PcRestartDto(WebHost host)
+    {
+        var r = host.PcRestart;
+        var p = r.Pending;
+        return new
+        {
+            pending = p == null ? null : new { at = p.At.ToUniversalTime(), reason = p.Reason, stopping = p.Stopping,
+                secondsLeft = Math.Max(0, (int)Math.Ceiling((p.At - DateTime.Now).TotalSeconds)) },
+            nextDaily = r.NextDaily()?.ToUniversalTime(),
+            error = r.LastError,
+        };
+    }
     private sealed record ChangePasswordRequest(string? Current, string? Next);
     private sealed record NewUserRequest(string? Username, string? Password, string? GroupId);
     private sealed record UpdateUserRequest(string? GroupId, bool? Disabled, string? Password);

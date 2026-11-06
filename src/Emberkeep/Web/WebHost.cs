@@ -29,7 +29,11 @@ public sealed class WebHost
         Discord = new DiscordBot(mgr);
         Learn = new LauncherLearn(mgr);
         Updates = new UpdateChecker(mgr);
+        PcRestart = new PcRestart(mgr);
     }
+
+    /// <summary>"Restart PC now" and the daily restart.</summary>
+    public PcRestart PcRestart { get; }
 
     /// <summary>Looks for a newer Emberkeep on GitHub.</summary>
     public UpdateChecker Updates { get; }
@@ -62,10 +66,20 @@ public sealed class WebHost
             {
                 var app = Build(port, lan);
                 await app.StartAsync();
+                if (!await AnswersLocally(port))
+                {
+                    // Listening on all addresses can succeed while another program holds 127.0.0.1 on the same port; the
+                    // window would then reach that program and be refused. Use the next port instead.
+                    using (var cts = new System.Threading.CancellationTokenSource(2000)) await app.StopAsync(cts.Token);
+                    await app.DisposeAsync();
+                    last = new IOException($"Another program answers on 127.0.0.1:{port}.");
+                    continue;
+                }
                 _app = app; Port = port; ListeningOnLan = lan;
                 ApplyForwarding();
                 Discord.Start();
                 Updates.Start();
+                PcRestart.Start();
                 _ = Task.Run(() => ArtCache.AutoDetectAsync(_mgr)); // once per run: art for custom servers that have none
                 return;
             }
@@ -75,6 +89,21 @@ public sealed class WebHost
             }
         }
         throw new InvalidOperationException("Couldn't open a port for the Emberkeep UI.", last);
+    }
+
+    // A random value only this copy of Emberkeep knows, to recognise its own answer on 127.0.0.1.
+    private readonly string _instanceId = Guid.NewGuid().ToString("N");
+    private const string InstancePath = "/auth/instance";
+
+    private async Task<bool> AnswersLocally(int port)
+    {
+        try
+        {
+            using var http = new System.Net.Http.HttpClient { Timeout = TimeSpan.FromSeconds(3) };
+            var answer = await http.GetStringAsync($"http://127.0.0.1:{port}{InstancePath}");
+            return answer == _instanceId;
+        }
+        catch { return false; }
     }
 
     public async Task RestartAsync()
@@ -143,6 +172,14 @@ public sealed class WebHost
         var remote = ctx.Connection.RemoteIpAddress;
         bool loopback = remote != null && IPAddress.IsLoopback(remote);
 
+        if (path == InstancePath)
+        {
+            // Only from this PC: lets Emberkeep check at startup that 127.0.0.1 really reaches it.
+            if (loopback) await ctx.Response.WriteAsync(_instanceId);
+            else ctx.Response.StatusCode = 404;
+            return;
+        }
+
         if (path == "/auth/local")
         {
             if (loopback && Auth.CheckLocalToken(ctx.Request.Query["t"]))
@@ -151,6 +188,12 @@ public sealed class WebHost
                 string target = ctx.Request.Query["next"].ToString();
                 // Only same-site relative paths, never "//host" or absolute URLs.
                 ctx.Response.Redirect(target.StartsWith('/') && !target.StartsWith("//") && !target.Contains('\\') ? target : "/");
+            }
+            else if (loopback)
+            {
+                // An old link (the token changes every launch), e.g. from browser history or a restored tab. Instead of a
+                // bare "access denied": carry on if this browser is still signed in, otherwise explain on the sign-in page.
+                ctx.Response.Redirect(Auth.Resolve(AuthService.SessionCookie(ctx)) != null ? "/" : "/login?expired=1");
             }
             else ctx.Response.StatusCode = 403;
             return;

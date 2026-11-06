@@ -20,10 +20,16 @@
     </div>
     <nav class="server-list" id="serverList" aria-label="Servers"></nav>
     <div class="sidebar-foot">
+      <div class="restart-note" id="restartNote" hidden></div>
       <div class="update-note" id="updateNote" hidden></div>
       <button class="btn btn-primary wide" id="addServerBtn" type="button">Add server</button>
       <button class="btn btn-ghost wide" id="appSettingsBtn" type="button">App settings</button>
-      <button class="whoami" id="whoami" type="button" title="Your account"></button>
+      <div class="who-row">
+        <button class="whoami" id="whoami" type="button" title="Your account"></button>
+        <button class="btn btn-icon share-link" id="shareLinkBtn" type="button" title="Copy the web link for friends" aria-label="Copy the web link for friends" aria-haspopup="menu" hidden>
+          <svg viewBox="0 0 20 20" width="15" height="15" aria-hidden="true"><path d="M8.5 11.5a3.2 3.2 0 0 0 4.6 0l2.6-2.6a3.2 3.2 0 0 0-4.6-4.6l-1 1M11.5 8.5a3.2 3.2 0 0 0-4.6 0l-2.6 2.6a3.2 3.2 0 0 0 4.6 4.6l1-1" stroke="currentColor" stroke-width="1.7" fill="none" stroke-linecap="round"/></svg>
+        </button>
+      </div>
     </div>
   </aside>
 
@@ -51,6 +57,10 @@
             <div class="head-sub">
               <span id="headGame"></span>
               <button class="link mono-path" id="headPath" type="button" title="Copy folder path"></button>
+              <button class="link browse-link" id="browseBtn" type="button" title="Open the server folder in File Explorer" hidden>
+                <svg viewBox="0 0 20 20" width="14" height="14" aria-hidden="true"><path d="M2.5 5.5a1.5 1.5 0 0 1 1.5-1.5h3.6l1.8 2h6.6a1.5 1.5 0 0 1 1.5 1.5v6.5a1.5 1.5 0 0 1-1.5 1.5H4a1.5 1.5 0 0 1-1.5-1.5z" stroke="currentColor" stroke-width="1.6" fill="none" stroke-linejoin="round"/></svg>
+                Browse files
+              </button>
             </div>
           </div>
           <div class="head-controls">
@@ -59,6 +69,9 @@
             <button class="btn btn-stop" id="stopBtn" type="button">Stop</button>
             <button class="btn btn-icon" id="killBtn" type="button" title="Force-close (the world won't be saved)" aria-label="Force-close">
               <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M10 2.5v7M5.6 5.2a6.5 6.5 0 1 0 8.8 0" stroke="currentColor" stroke-width="2" fill="none" stroke-linecap="round"/></svg>
+            </button>
+            <button class="btn btn-icon" id="moreBtn" type="button" title="More: check files again, setup help, remove" aria-label="More actions" aria-haspopup="menu">
+              <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><circle cx="4" cy="10" r="1.7" fill="currentColor"/><circle cx="10" cy="10" r="1.7" fill="currentColor"/><circle cx="16" cy="10" r="1.7" fill="currentColor"/></svg>
             </button>
           </div>
         </div>

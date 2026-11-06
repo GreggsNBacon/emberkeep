@@ -351,11 +351,11 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 
 /* ---------- settings ---------- */
 .panel-settings { overflow-y: auto; }
-.settings { max-width: 860px; display: flex; flex-direction: column; gap: 26px; padding-bottom: 30px; }
+.settings { display: flex; flex-direction: column; gap: 26px; padding-bottom: 30px; }
 .set-group h2 { margin: 0 0 4px; font: 600 16px var(--display); }
 .set-group > p { margin: 0 0 12px; color: var(--fog-dim); font-size: 13px; max-width: 70ch; }
 .set-rows { display: flex; flex-direction: column; gap: 12px; background: var(--hull); border: 1px solid var(--rope); border-radius: var(--r-lg); padding: 16px 18px; }
-.set-row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; }
+.set-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
 .set-row > label { padding-top: 7px; font-weight: 600; font-size: 13.5px; }
 .set-row .help { font-size: 12.5px; color: var(--fog-faint); margin-top: 4px; }
 .set-row .input { width: 100%; }
@@ -640,3 +640,36 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .update-title { font-weight: 600; margin-bottom: 8px; }
 .update-actions { display: flex; gap: 6px; flex-wrap: wrap; }
 .update-actions a.btn { text-decoration: none; }
+
+/* Server menu: the destructive entry in red */
+.menu-item.danger .mi-label { color: var(--bad-text); }
+/* Setup help: web searches */
+.help-searches { display: grid; gap: 8px; }
+.help-search { display: flex; flex-direction: column; gap: 2px; padding: 10px 12px; border: 1px solid var(--rope); border-radius: var(--r-md);
+  background: var(--deck); color: var(--fog); text-decoration: none; }
+.help-search:hover { border-color: var(--brand); background: var(--deck-hi); }
+.help-search .mi-sub { color: var(--fog-dim); font-size: 12.5px; }
+.help-files { margin: 6px 0 0; padding-left: 18px; }
+.help-files li { font-size: 12.5px; }
+/* Menus of actions (not addresses or ports) use the normal font */
+.menu-pop.plain .mi-label { font-family: var(--ui); }
+/* Long values (encoded launch arguments, deep paths) wrap inside their row instead of widening the section */
+.set-row > * { min-width: 0; }
+.set-row .help, .set-row .mono-path, .set-row .dim { overflow-wrap: anywhere; }
+/* "Browse files" next to the server folder path in the header */
+.browse-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--fog-dim); white-space: nowrap; flex: none; }
+.browse-link:hover { color: var(--fog); }
+.browse-link[hidden] { display: none; }
+/* Sign-in page: an old desktop link was opened */
+.login .expired-note { display: block; margin: 0 0 16px; line-height: 1.45; }
+.login .expired-note[hidden] { display: none; }
+/* Sidebar: "On the host PC" with the web-link button beside it */
+.who-row { display: flex; align-items: center; gap: 4px; margin-top: 2px; }
+.who-row .whoami { flex: 1; min-width: 0; margin-top: 0; }
+.share-link { width: 30px; height: 30px; flex: none; }
+.share-link[hidden] { display: none; }
+/* Sidebar countdown while this PC is about to restart */
+.restart-note { border: 1px solid color-mix(in srgb, var(--warn) 55%, var(--rope)); background: color-mix(in srgb, var(--warn) 10%, var(--hull));
+  border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; color: var(--warn-text); }
+.restart-note[hidden] { display: none; }
+.restart-title { font-weight: 600; font-variant-numeric: tabular-nums; }
