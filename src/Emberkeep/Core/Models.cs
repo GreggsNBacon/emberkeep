@@ -73,6 +73,8 @@ public sealed class AppSettings
     public DiscordSettings Discord { get; set; } = new();
     /// <summary>Set once Steam's "Dedicated Server" suffixes have been taken off existing server names.</summary>
     public bool NamesTidied { get; set; }
+    /// <summary>Look for a newer Emberkeep on GitHub (on start and every 12 hours).</summary>
+    public bool CheckForUpdates { get; set; } = true;
 }
 
 public sealed record LogLine(long Seq, DateTime Time, string Source, string Text);

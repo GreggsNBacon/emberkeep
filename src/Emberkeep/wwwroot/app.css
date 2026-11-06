@@ -632,3 +632,11 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
   color: color-mix(in srgb, var(--game) 55%, #000);
   box-shadow: inset 0 0 0 1px color-mix(in srgb, var(--game) 50%, #fff);
 }
+
+/* Sidebar notice when a newer Emberkeep is out */
+.update-note { border: 1px solid color-mix(in srgb, var(--brand) 55%, var(--rope)); background: color-mix(in srgb, var(--brand) 10%, var(--hull));
+  border-radius: var(--r-md); padding: 10px 12px; margin-bottom: 8px; }
+.update-note[hidden] { display: none; }
+.update-title { font-weight: 600; margin-bottom: 8px; }
+.update-actions { display: flex; gap: 6px; flex-wrap: wrap; }
+.update-actions a.btn { text-decoration: none; }

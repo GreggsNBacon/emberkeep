@@ -28,7 +28,11 @@ public sealed class WebHost
         Ports = new RouterPortService(mgr);
         Discord = new DiscordBot(mgr);
         Learn = new LauncherLearn(mgr);
+        Updates = new UpdateChecker(mgr);
     }
+
+    /// <summary>Looks for a newer Emberkeep on GitHub.</summary>
+    public UpdateChecker Updates { get; }
 
     public AuthService Auth { get; }
     /// <summary>Opens Emberkeep's own port on the router (UPnP) when internet access is on.</summary>
@@ -61,6 +65,7 @@ public sealed class WebHost
                 _app = app; Port = port; ListeningOnLan = lan;
                 ApplyForwarding();
                 Discord.Start();
+                Updates.Start();
                 _ = Task.Run(() => ArtCache.AutoDetectAsync(_mgr)); // once per run: art for custom servers that have none
                 return;
             }
