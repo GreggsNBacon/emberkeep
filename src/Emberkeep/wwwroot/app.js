@@ -522,6 +522,7 @@ function renderHeader() {
   $('#headName').textContent = s.name;
   $('#headGame').textContent = g.name;
   $('#headPath').textContent = s.installDir;
+  $('#browseBtn').hidden = !isLocal || state.detail?.installDirExists === false;
   document.title = `${s.name} | Emberkeep`;
 
   const st = $('#statState');
@@ -1412,6 +1413,7 @@ function serverMenu(anchor) {
   if (!s) return;
   const stopped = s.state === 'Stopped';
   const items = [];
+  if (isLocal) items.push({ label: 'Browse files', sub: 'Open the server folder in File Explorer', onClick: browseFiles });
   if (can('launch')) items.push({ label: 'Check files again', disabled: !stopped,
     sub: stopped ? 'Look for the game, server program and config files again, e.g. after a download finishes' : 'Stop the server first',
     onClick: recheckServer });
@@ -1420,6 +1422,13 @@ function serverMenu(anchor) {
   if (can('launch')) items.push('sep', { label: 'Remove server', danger: true, disabled: !stopped,
     sub: stopped ? 'From Emberkeep only: its files stay on disk' : 'Stop the server first', onClick: removeServer });
   openMenu(anchor, items, { plain: true });
+}
+
+// Opens the server's folder in File Explorer (on the host PC only).
+async function browseFiles() {
+  const s = current();
+  if (!s) return;
+  try { await api('POST', `/api/servers/${s.id}/browse`); } catch (e) { toast(e.message, 'bad'); }
 }
 
 // Right-clicking a server in the list opens the same menu at the pointer.
@@ -2392,6 +2401,7 @@ function wire() {
   $('#killBtn').onclick = () => control('kill');
   $('#moreBtn').onclick = e => serverMenu(e.currentTarget);
   $('#headPath').onclick = () => copyText(current()?.installDir || '', 'Copied the folder path.');
+  $('#browseBtn').onclick = browseFiles;
   $$('.tab[data-tab]').forEach(t => t.onclick = () => setTab(t.dataset.tab));
 
   const c = $('#console');

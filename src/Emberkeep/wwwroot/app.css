@@ -351,11 +351,11 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 
 /* ---------- settings ---------- */
 .panel-settings { overflow-y: auto; }
-.settings { max-width: 860px; display: flex; flex-direction: column; gap: 26px; padding-bottom: 30px; }
+.settings { display: flex; flex-direction: column; gap: 26px; padding-bottom: 30px; }
 .set-group h2 { margin: 0 0 4px; font: 600 16px var(--display); }
 .set-group > p { margin: 0 0 12px; color: var(--fog-dim); font-size: 13px; max-width: 70ch; }
 .set-rows { display: flex; flex-direction: column; gap: 12px; background: var(--hull); border: 1px solid var(--rope); border-radius: var(--r-lg); padding: 16px 18px; }
-.set-row { display: grid; grid-template-columns: 200px 1fr; gap: 16px; align-items: start; }
+.set-row { display: grid; grid-template-columns: 200px minmax(0, 1fr); gap: 16px; align-items: start; }
 .set-row > label { padding-top: 7px; font-weight: 600; font-size: 13.5px; }
 .set-row .help { font-size: 12.5px; color: var(--fog-faint); margin-top: 4px; }
 .set-row .input { width: 100%; }
@@ -653,3 +653,13 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .help-files li { font-size: 12.5px; }
 /* Menus of actions (not addresses or ports) use the normal font */
 .menu-pop.plain .mi-label { font-family: var(--ui); }
+/* Long values (encoded launch arguments, deep paths) wrap inside their row instead of widening the section */
+.set-row > * { min-width: 0; }
+.set-row .help, .set-row .mono-path, .set-row .dim { overflow-wrap: anywhere; }
+/* "Browse files" next to the server folder path in the header */
+.browse-link { display: inline-flex; align-items: center; gap: 5px; font-size: 12.5px; color: var(--fog-dim); white-space: nowrap; flex: none; }
+.browse-link:hover { color: var(--fog); }
+.browse-link[hidden] { display: none; }
+/* Sign-in page: an old desktop link was opened */
+.login .expired-note { display: block; margin: 0 0 16px; line-height: 1.45; }
+.login .expired-note[hidden] { display: none; }

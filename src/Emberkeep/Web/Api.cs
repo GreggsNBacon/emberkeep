@@ -146,6 +146,20 @@ public static class Api
             catch (InvalidOperationException ex) { return Error(ex.Message); }
         }).Need(Permissions.Launch);
 
+        // "Browse files": open the server's folder in File Explorer. Only from this PC: from anywhere else it would open
+        // a window on the host where nobody is looking.
+        api.MapPost("/servers/{id}/browse", (string id, HttpContext ctx) =>
+        {
+            var rt = mgr.Get(id);
+            if (rt == null) return Results.NotFound();
+            var remote = ctx.Connection.RemoteIpAddress;
+            if (remote == null || !System.Net.IPAddress.IsLoopback(remote)) return Error("Browse files only works on the PC that runs Emberkeep.");
+            var dir = rt.Config.InstallDir;
+            if (!Directory.Exists(dir)) return Error($"The server folder can't be found: {dir}");
+            System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true });
+            return Results.Ok();
+        }).See();
+
         // "Check files again": look at the folder afresh, e.g. after the server finished downloading.
         api.MapPost("/servers/{id}/recheck", (string id, HttpContext ctx) =>
         {

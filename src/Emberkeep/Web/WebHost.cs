@@ -152,6 +152,12 @@ public sealed class WebHost
                 // Only same-site relative paths, never "//host" or absolute URLs.
                 ctx.Response.Redirect(target.StartsWith('/') && !target.StartsWith("//") && !target.Contains('\\') ? target : "/");
             }
+            else if (loopback)
+            {
+                // An old link (the token changes every launch), e.g. from browser history or a restored tab. Instead of a
+                // bare "access denied": carry on if this browser is still signed in, otherwise explain on the sign-in page.
+                ctx.Response.Redirect(Auth.Resolve(AuthService.SessionCookie(ctx)) != null ? "/" : "/login?expired=1");
+            }
             else ctx.Response.StatusCode = 403;
             return;
         }
