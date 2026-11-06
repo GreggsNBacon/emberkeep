@@ -151,14 +151,16 @@ public sealed class ServerManager : IDisposable
     {
         var stopped = Runtimes.Where(r => r.State == ServerState.Stopped).ToList();
         if (stopped.Count == 0) return;
-        var byPath = new Dictionary<string, ServerRuntime>(StringComparer.OrdinalIgnoreCase);
+        var byPath = new Dictionary<string, List<ServerRuntime>>(StringComparer.OrdinalIgnoreCase);
         foreach (var rt in stopped)
         {
             var exe = rt.ResolveExecutable();
             if (!Path.IsPathRooted(exe)) continue; // java, cmd… too generic to match safely
             var ext = Path.GetExtension(exe);
             if (ext.Equals(".bat", StringComparison.OrdinalIgnoreCase) || ext.Equals(".cmd", StringComparison.OrdinalIgnoreCase)) continue;
-            byPath.TryAdd(Path.GetFullPath(exe), rt);
+            var full = Path.GetFullPath(exe);
+            if (!byPath.TryGetValue(full, out var list)) byPath[full] = list = [];
+            list.Add(rt);
         }
         if (byPath.Count == 0) return;
         var names = byPath.Keys.Select(Path.GetFileNameWithoutExtension).ToHashSet(StringComparer.OrdinalIgnoreCase);
@@ -168,11 +170,26 @@ public sealed class ServerManager : IDisposable
             {
                 if (!names.Contains(p.ProcessName)) continue;
                 var path = Native.ImagePath(p.Id);
-                if (path != null && byPath.TryGetValue(path, out var rt)) rt.Adopt(p.Id);
+                if (path == null || !byPath.TryGetValue(path, out var candidates)) continue;
+                var rt = candidates.FirstOrDefault(r => r.State == ServerState.Stopped && IsThisServer(r, path, p.Id));
+                rt?.Adopt(p.Id);
             }
             catch { }
             finally { p.Dispose(); }
         }
+    }
+
+    /// <summary>
+    /// Whether a running process with the server's program is really this server. A program inside the server's own folder
+    /// (PalServer.exe) is enough. A shared one (java.exe, node.exe) runs other things too, so its command line must point
+    /// into the server's folder: otherwise Stop could close an unrelated program.
+    /// </summary>
+    private static bool IsThisServer(ServerRuntime rt, string exePath, int pid)
+    {
+        var dir = Path.TrimEndingDirectorySeparator(Path.GetFullPath(rt.Config.InstallDir));
+        if (exePath.StartsWith(dir + Path.DirectorySeparatorChar, StringComparison.OrdinalIgnoreCase)) return true;
+        var cmd = Native.CommandLine(pid);
+        return cmd != null && cmd.Contains(dir, StringComparison.OrdinalIgnoreCase);
     }
 
     private void Tick()

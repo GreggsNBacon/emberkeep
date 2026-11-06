@@ -259,7 +259,7 @@ textarea.input { height: auto; padding: 8px 11px; resize: vertical; }
 .ln.s-err, .ln.s-error, .ln.lvl-error { color: var(--bad-text); }
 .ln.lvl-warn { color: var(--warn-text); }
 .ln.s-system { color: var(--fog-faint); font-style: italic; }
-.ln.s-cmd { color: color-mix(in srgb, var(--game) 55%, white); font-weight: 600; }
+.ln.s-cmd { color: color-mix(in srgb, var(--game) 55%, var(--fog)); font-weight: 600; }
 .ln.s-reply { color: var(--info-text); }
 .ln mark { background: color-mix(in srgb, var(--game) 40%, transparent); color: inherit; border-radius: 2px; }
 .console-empty { color: var(--fog-faint); font-family: var(--ui); font-style: normal; }

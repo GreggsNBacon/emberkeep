@@ -788,6 +788,7 @@ async function openFile(f) {
   const s = current();
   try {
     const d = await api('GET', `/api/servers/${s.id}/configs/file?path=${encodeURIComponent(f.path)}`);
+    if (s.id !== state.selectedId) return; // switched to another server while this loaded: don't show its file there
     localStorage.setItem(`hb.file.${s.id}`, f.path);
     const model = parseConfig(d.format, d.content);
     state.editor = {
