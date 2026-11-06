@@ -9,6 +9,7 @@ const state = {
   servers: [],
   selectedId: localStorage.getItem('hb.selected') || null,
   tab: localStorage.getItem('hb.tab') || 'console',
+  view: localStorage.getItem('hb.view') === 'overview' ? 'overview' : 'server', // the Overview page or one server
   detail: null,
   logSource: null,
   logLines: [],
@@ -340,8 +341,8 @@ function renderSidebar() {
     const g = game(s.gameId);
     const sub = s.state === 'Running' ? `Running for ${fmtUptime(s.uptimeSeconds)}` : stateLabel(s);
     const item = h('button', {
-      class: `server-item${s.id === state.selectedId ? ' active' : ''}`, type: 'button',
-      'aria-current': s.id === state.selectedId ? 'true' : null,
+      class: `server-item${s.id === state.selectedId && state.view !== 'overview' ? ' active' : ''}`, type: 'button',
+      'aria-current': s.id === state.selectedId && state.view !== 'overview' ? 'true' : null,
       onclick: () => { select(s.id); $('#app').classList.remove('menu'); },
       oncontextmenu: e => serverContextMenu(e, s.id),
     },
@@ -356,7 +357,9 @@ function renderSidebar() {
 // ---------------- server view ----------------
 
 function select(id) {
-  if (state.selectedId === id && state.detail) return;
+  const fromOverview = state.view === 'overview';
+  if (fromOverview) { state.view = 'server'; localStorage.setItem('hb.view', 'server'); $('#overviewView').hidden = true; }
+  if (state.selectedId === id && state.detail) { if (fromOverview) renderAll(); return; }
   if (state.editor && isDirty() && !window.confirm('You have unsaved changes in a config file. Discard them?')) return;
   state.selectedId = id;
   localStorage.setItem('hb.selected', id || '');
@@ -380,11 +383,16 @@ async function loadDetail() {
     renderPorts();
     if (state.tab === 'settings') renderSettings();
     if (state.tab === 'configs') loadConfigs();
+    if (state.tab === 'backups') loadBackups();
+    if (state.tab === 'schedule') loadSchedule();
   } catch (e) { toast(e.message, 'bad'); }
 }
 
 function renderAll() {
   renderSidebar();
+  renderOverviewButton();
+  if (state.view === 'overview' && state.servers.length) { showOverview(); return; }
+  $('#overviewView').hidden = true;
   const s = current();
   $('#emptyState').hidden = !!state.servers.length;
   $('#serverView').hidden = !s;
@@ -572,6 +580,8 @@ function renderHeader() {
       h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => learnDialog(s.id) }, 'Learn from launcher'));
   }
 
+  extrasHeader(s, n);
+
   // Command box availability
   const input = $('#cmdInput');
   const ch = s.commandChannel;
@@ -619,7 +629,9 @@ function setTab(tab, silent) {
   state.tab = tab;
   localStorage.setItem('hb.tab', tab);
   $$('.tab').forEach(t => t.setAttribute('aria-selected', t.dataset.tab === tab ? 'true' : 'false'));
-  for (const p of ['console', 'configs', 'settings']) $(`#panel-${p}`).hidden = p !== tab;
+  for (const p of ['console', 'configs', 'backups', 'schedule', 'settings']) $(`#panel-${p}`).hidden = p !== tab;
+  if (tab === 'backups') loadBackups();
+  if (tab === 'schedule') loadSchedule();
   if (tab === 'console') scrollConsole(true);
   if (tab === 'configs' && !state.configs) loadConfigs();
   if (tab === 'settings' && state.detail && (!silent || !$('#settingsForm').childElementCount)) renderSettings();
@@ -827,7 +839,7 @@ function renderEditor() {
   $('#edPath').textContent = ed.path;
   const formOk = !!ed.model;
   if (!formOk) ed.mode = 'text';
-  $$('.seg-btn').forEach(b => {
+  $$('.seg-btn[data-mode]').forEach(b => {
     b.setAttribute('aria-pressed', b.dataset.mode === ed.mode ? 'true' : 'false');
     if (b.dataset.mode === 'form') { b.disabled = !formOk; b.title = formOk ? '' : 'This file type can only be edited as text'; }
   });
@@ -1217,11 +1229,13 @@ function renderSettings() {
   const g = game(c.gameId);
   const form = $('#settingsForm');
   form.replaceChildren();
+  form.append(notesGroup(c));
   // Launch settings decide what runs on the host PC; without that permission they're shown read-only or left out.
   const launchOk = can('launch');
   const readOnly = value => h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, value);
 
-  const row = (label, control, help) => h('div', { class: 'set-row' }, h('label', {}, label), h('div', {}, control, help ? h('div', { class: 'help' }, help) : null));
+  const ADV_ROWS = new Set(['Executable', 'Launcher', 'Launch arguments', 'Working folder', 'Environment']);
+  const row = (label, control, help) => h('div', { class: `set-row${ADV_ROWS.has(label) ? ' adv' : ''}` }, h('label', {}, label), h('div', {}, control, help ? h('div', { class: 'help' }, help) : null));
   const text = (key, opts = {}) => {
     const i = h('input', { class: `input${opts.mono ? ' mono' : ''}`, type: opts.type || 'text', spellcheck: 'false', placeholder: opts.placeholder || '' });
     i.value = opts.get ? opts.get() : (c[key] ?? '');
@@ -1305,6 +1319,12 @@ function renderSettings() {
     return h('div', { class: 'inline' }, h('span', { class: 'toggle' }, cb, h('span')),
       h('span', { class: 'dim' }, 'Start this server when Emberkeep starts. With Start with Windows on (App settings), it starts after a reboot too.'));
   })());
+  const updateRow = () => c.steamCmdAppId ? row('Update before starting', (() => {
+    const cb = h('input', { type: 'checkbox', ...(c.updateBeforeStart ? { checked: true } : {}) });
+    cb.addEventListener('change', () => c.updateBeforeStart = cb.checked);
+    return h('div', { class: 'inline' }, h('span', { class: 'toggle' }, cb, h('span')),
+      h('span', { class: 'dim' }, 'Download any server update with SteamCMD each time the server starts, so friends on the newest game version can join'));
+  })()) : null;
   const restartRow = () => row('Restart after a crash', (() => {
     const cb = h('input', { type: 'checkbox', ...(c.autoRestart ? { checked: true } : {}) });
     cb.addEventListener('change', () => c.autoRestart = cb.checked);
@@ -1316,12 +1336,13 @@ function renderSettings() {
       h('div', { class: 'notice', style: { margin: '0 0 12px' } }, 'The executable, launch arguments, folders and environment can only be changed by accounts with the "Change launch settings" permission, because they decide what runs on the host PC.'),
       h('div', { class: 'set-rows' },
         row('Executable', readOnly(d.resolvedExecutable || c.executable)),
-        autoStartRow(), restartRow())));
+        autoStartRow(), restartRow(), updateRow())));
   }
   const exeInput = text('executable', { mono: true });
   if (launchOk) form.append(h('section', { class: 'set-group' },
     h('h2', {}, 'Launch'),
-    h('p', {}, g.id === 'valheim' ? g.notes : 'How Emberkeep starts the server. Paths can be relative to the server folder.'),
+    h('p', { class: 'adv' }, g.id === 'valheim' ? g.notes : 'How Emberkeep starts the server. Paths can be relative to the server folder.'),
+    h('p', { class: 'basic-only' }, 'The server program, launch arguments and other launch details are in Advanced (top right).'),
     h('div', { class: 'set-rows' },
       row('Executable', withBrowse(exeInput, { title: 'Choose the server program', files: true, relative: true }),
         d.resolvedExecutable && d.resolvedExecutable !== c.executable ? `Runs ${d.resolvedExecutable}` : null),
@@ -1349,6 +1370,7 @@ function renderSettings() {
       })()),
       autoStartRow(),
       restartRow(),
+      updateRow(),
     )));
 
   // Console & shutdown
@@ -1385,12 +1407,12 @@ function renderSettings() {
   stopSel.addEventListener('change', () => { c.stopMethod = stopSel.value; drawRc(); });
   fromCfg.addEventListener('change', () => { c.rconFromConfig = fromCfg.checked; });
   drawRc();
-  form.append(h('section', { class: 'set-group' }, h('h2', {}, 'Console and shutdown'), rcRows));
+  form.append(h('section', { class: 'set-group adv' }, h('h2', {}, 'Console and shutdown'), rcRows));
 
   const logs = h('textarea', { class: 'input mono', rows: 2, spellcheck: 'false', placeholder: 'logs\\server.log' });
   logs.value = (c.extraLogFiles || []).join('\n');
   logs.addEventListener('input', () => c.extraLogFiles = logs.value.split('\n').map(x => x.trim()).filter(Boolean));
-  if (launchOk) form.append(h('section', { class: 'set-group' },
+  if (launchOk) form.append(h('section', { class: 'set-group adv' },
     h('h2', {}, 'Logs'),
     h('p', {}, 'Emberkeep shows the server\'s console output and follows these log files live.'),
     h('div', { class: 'set-rows' },
@@ -1432,6 +1454,8 @@ function serverMenu(anchor) {
     onClick: recheckServer });
   if (can('launch') && state.detail?.config?.steamCmdAppId) items.push({ label: 'Update server files', disabled: !stopped || null,
     sub: stopped ? 'Download the latest version of the server with SteamCMD' : 'Stop the server first', onClick: updateServerFiles });
+  if (can('control')) items.push({ label: 'Back up now', sub: 'Save a copy of the world and config files', onClick: () => backupNow(s.id) });
+  if (can('launch') && (state.me?.full || state.me?.canAddServers)) items.push({ label: 'Duplicate server', sub: 'Add another server with the same settings, optionally copying its files', onClick: duplicateDialog });
   items.push({ label: 'Find setup help online', sub: 'Web searches for setup guides, config files and ports', onClick: setupHelpDialog });
   items.push({ label: 'Copy folder path', sub: s.installDir, onClick: () => copyText(s.installDir, 'Copied the folder path.') });
   if (can('launch')) items.push('sep', { label: 'Remove server', danger: true, disabled: !stopped,
@@ -1708,10 +1732,10 @@ async function pollInstalls() {
   for (const j of st.jobs.filter(j => j.finished && (installWatching.has(j.id) || installSeen.has(j.id)))) {
     installWatching.delete(j.id); installSeen.delete(j.id);
     if (j.state === 'done') {
-      toast(j.kind === 'install' ? `${j.title} is installed and ready to start.` : `${j.title} is up to date.`, 'good');
-      if (j.kind === 'install' && j.serverId) setTimeout(() => select(j.serverId), 600);
+      toast(j.kind === 'install' ? `${j.title} is installed and ready to start.` : j.kind === 'copy' ? `${j.title} is ready.` : `${j.title} is up to date.`, 'good');
+      if (j.kind !== 'update' && j.serverId) setTimeout(() => select(j.serverId), 600);
       else if (j.serverId === state.selectedId) loadDetail();
-    } else if (j.state === 'failed') toast(`${j.kind === 'install' ? 'Installing' : 'Updating'} ${j.title} failed: ${j.error}`, 'bad');
+    } else if (j.state === 'failed') toast(`${jobVerb(j)} ${j.title} failed: ${j.error}`, 'bad');
   }
   running.forEach(j => installSeen.add(j.id));
   el.hidden = !running.length;
@@ -1719,7 +1743,7 @@ async function pollInstalls() {
     const pct = Math.max(0, Math.min(100, j.percent || 0));
     const bytes = j.bytesTotal > 0 ? ` · ${fmtBytes(j.bytesDone)} of ${fmtBytes(j.bytesTotal)}` : '';
     return h('div', { class: 'install-job' },
-      h('div', { class: 'install-title' }, `${j.kind === 'install' ? 'Installing' : 'Updating'} ${j.title}`),
+      h('div', { class: 'install-title' }, `${jobVerb(j)} ${j.title}`),
       h('div', { class: 'install-bar' }, h('span', { style: { width: `${j.state === 'downloading' ? pct : 0}%` } })),
       h('div', { class: 'install-msg' }, h('span', {}, j.state === 'downloading' ? `${j.message} ${pct.toFixed(0)}%${bytes}` : j.message),
         h('button', { class: 'link', type: 'button', onclick: async () => {
@@ -2109,7 +2133,7 @@ async function appSettingsDialog() {
               const p = await browse({ title: 'Choose where new servers go', start: root.value });
               if (p) { root.value = p; save({ installRoot: p }, 'Saved.'); }
             } }, 'Browse')), h('div', { class: 'help' }, 'Each new server gets its own folder in here, named after the game.'))),
-          h('div', { class: 'set-row' }, h('label', {}, 'SteamCMD'),
+          h('div', { class: 'set-row adv' }, h('label', {}, 'SteamCMD'),
             h('div', {}, scp, h('div', { class: 'help' }, st.steamCmdInstalled ? `In use: ${st.steamCmdInUse}` : 'Not set up yet. Emberkeep downloads it from Valve the first time you install a server.')))));
     };
 
@@ -2296,7 +2320,7 @@ async function appSettingsDialog() {
               h('span', { class: 'dim' }, st.hasAccounts ? (st.listeningOnLan ? 'On. Other devices can connect.' : 'Off. Only this PC can open Emberkeep.') : 'Create an account first.'))),
           st.listeningOnLan ? h('div', { class: 'set-row' }, h('label', {}, 'Address'),
             h('div', { class: 'url-list' }, st.lanUrls.length ? st.lanUrls.map(u => copyLine(u, 'the link')) : h('span', { class: 'dim' }, 'No network connection found.'))) : null,
-          h('div', { class: 'set-row' }, h('label', {}, 'Port'), h('div', {}, h('div', { class: 'inline' }, port, applyPort),
+          h('div', { class: 'set-row adv' }, h('label', {}, 'Port'), h('div', {}, h('div', { class: 'inline' }, port, applyPort),
             h('div', { class: 'help' }, st.port !== st.configuredPort ? `Port ${st.configuredPort} was busy, so Emberkeep is using ${st.port}.` : 'When you first turn on remote access, Windows asks whether to allow Emberkeep through the firewall. Allow it on private networks.'))),
         )),
       internetGroup(),
@@ -2311,9 +2335,10 @@ async function appSettingsDialog() {
               st.startupOtherCopy ? h('div', { class: 'help' }, 'Windows currently starts a different copy of Emberkeep. Turning this on switches it to this one.') : null)),
           h('div', { class: 'set-row' }, h('label', {}, 'Keep running in the tray'),
             h('div', { class: 'inline' }, h('span', { class: 'toggle' }, tray, h('span')), h('span', { class: 'dim' }, 'Closing the window while servers run hides Emberkeep in the tray instead of quitting'))),
-          h('div', { class: 'set-row' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)),
+          h('div', { class: 'set-row adv' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)),
         )),
       installGroup(),
+      ...extrasAppGroups(st, putSettings),
       restartGroup(),
       updatesGroup(),
     );
@@ -2654,6 +2679,8 @@ function connectEvents() {
     state.servers = JSON.parse(e.data);
     const now = current();
     renderSidebar();
+    renderOverviewButton();
+    if (state.view === 'overview' && state.servers.length) { renderOverview(); return; }
     $('#emptyState').hidden = !!state.servers.length;
     if (!now) {
       if (state.servers.length) select(state.servers[0].id);
@@ -2717,7 +2744,7 @@ function wire() {
   });
 
   // editor
-  $$('.seg-btn').forEach(b => b.onclick = () => setMode(b.dataset.mode));
+  $$('.seg-btn[data-mode]').forEach(b => b.onclick = () => setMode(b.dataset.mode));
   $('#formFilter').addEventListener('input', renderForm);
   $('#saveBtn').onclick = () => saveFile();
   $('#revertBtn').onclick = () => {
@@ -2776,7 +2803,7 @@ async function init() {
   // Deep links: #server=<id>&tab=configs&dialog=add|settings
   const hash = new URLSearchParams(location.hash.slice(1));
   if (hash.get('server')) state.selectedId = hash.get('server');
-  if (['console', 'configs', 'settings'].includes(hash.get('tab'))) state.tab = hash.get('tab');
+  if (['console', 'configs', 'backups', 'schedule', 'settings'].includes(hash.get('tab'))) state.tab = hash.get('tab');
   if (!state.servers.some(s => s.id === state.selectedId)) state.selectedId = state.servers[0]?.id || null;
   renderAll();
   if (state.selectedId) { loadDetail(); connectLogs(); }

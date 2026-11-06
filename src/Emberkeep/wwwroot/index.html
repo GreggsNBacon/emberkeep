@@ -18,6 +18,10 @@
         <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
       </button>
     </div>
+    <button class="overview-item" id="overviewBtn" type="button" hidden>
+      <svg viewBox="0 0 20 20" width="16" height="16" aria-hidden="true"><rect x="3" y="3" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="11" y="3" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="3" y="11" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/><rect x="11" y="11" width="6" height="6" rx="1.5" fill="none" stroke="currentColor" stroke-width="1.7"/></svg>
+      <span>Overview</span><span class="overview-count" id="overviewCount"></span>
+    </button>
     <nav class="server-list" id="serverList" aria-label="Servers"></nav>
     <div class="sidebar-foot">
       <div class="restart-note" id="restartNote" hidden></div>
@@ -35,6 +39,10 @@
   </aside>
 
   <main class="main" id="main">
+    <div class="seg mode-switch" role="group" aria-label="How much to show">
+      <button type="button" class="seg-btn" data-ui-mode="basic" title="Just the everyday controls">Basic</button>
+      <button type="button" class="seg-btn" data-ui-mode="advanced" title="Every setting and technical detail">Advanced</button>
+    </div>
     <button class="btn btn-icon menu-open" id="menuOpen" type="button" aria-label="Show servers">
       <svg viewBox="0 0 20 20" width="18" height="18" aria-hidden="true"><path d="M3 5h14M3 10h14M3 15h14" stroke="currentColor" stroke-width="2" stroke-linecap="round"/></svg>
     </button>
@@ -48,6 +56,21 @@
         <button class="btn" id="emptyFolderBtn" type="button">Add a folder</button>
         <button class="btn" id="emptyInstallBtn" type="button">Install a server</button>
       </div>
+    </section>
+
+    <section class="overview" id="overviewView" hidden>
+      <header class="overview-head">
+        <h1>Overview</h1>
+        <p class="dim" id="ovSummary"></p>
+      </header>
+      <div class="ov-cards" id="ovCards"></div>
+      <section class="ov-activity">
+        <div class="ov-activity-head">
+          <h2>Activity</h2>
+          <select class="input select" id="ovFilter" aria-label="Show activity for"></select>
+        </div>
+        <ol class="activity-list" id="ovActivity"></ol>
+      </section>
     </section>
 
     <section class="server-view" id="serverView" hidden>
@@ -79,10 +102,11 @@
         </div>
         <dl class="stats">
           <div><dt>Status</dt><dd id="statState"></dd></div>
+          <div class="stat-players" id="statPlayersBox" hidden><dt>Players</dt><dd><button class="link" id="statPlayers" type="button"></button></dd></div>
           <div><dt>Uptime</dt><dd id="statUptime">–</dd></div>
-          <div><dt>CPU</dt><dd id="statCpu">–</dd></div>
-          <div><dt>Memory</dt><dd id="statMem">–</dd></div>
-          <div><dt>Process ID</dt><dd id="statPid">–</dd></div>
+          <div class="stat-spark"><dt>CPU</dt><dd id="statCpu">–</dd><svg class="spark adv" id="sparkCpu" viewBox="0 0 80 18" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+          <div class="stat-spark"><dt>Memory</dt><dd id="statMem">–</dd><svg class="spark adv" id="sparkMem" viewBox="0 0 80 18" preserveAspectRatio="none" aria-hidden="true"></svg></div>
+          <div class="adv"><dt>Process ID</dt><dd id="statPid">–</dd></div>
           <div class="stat-join"><dt id="joinLabel">Join address</dt><dd id="joinValue">–</dd></div>
           <div class="stat-ports"><dt>Router ports</dt><dd id="portsValue">–</dd></div>
         </dl>
@@ -90,6 +114,8 @@
         <div class="tabs" role="tablist">
           <button role="tab" class="tab" data-tab="console" type="button">Console</button>
           <button role="tab" class="tab" data-tab="configs" type="button">Config files</button>
+          <button role="tab" class="tab" data-tab="backups" type="button">Backups</button>
+          <button role="tab" class="tab" data-tab="schedule" type="button">Schedule</button>
           <button role="tab" class="tab" data-tab="settings" type="button">Settings</button>
         </div>
       </header>
@@ -97,8 +123,8 @@
       <div class="tab-panel panel-console" id="panel-console" role="tabpanel">
         <div class="toolbar">
           <input class="input search" id="logFilter" type="search" placeholder="Filter the log" aria-label="Filter the log">
-          <label class="check"><input type="checkbox" id="logWrap" checked> Wrap lines</label>
-          <label class="check"><input type="checkbox" id="logTimes"> Timestamps</label>
+          <label class="check adv"><input type="checkbox" id="logWrap" checked> Wrap lines</label>
+          <label class="check adv"><input type="checkbox" id="logTimes"> Timestamps</label>
           <span class="spacer"></span>
           <button class="btn btn-small btn-ghost" id="copyLogBtn" type="button">Copy log</button>
           <button class="btn btn-small btn-ghost" id="clearLogBtn" type="button">Clear</button>
@@ -147,6 +173,9 @@
         </div>
       </div>
 
+      <div class="tab-panel panel-backups" id="panel-backups" role="tabpanel" hidden></div>
+      <div class="tab-panel panel-schedule" id="panel-schedule" role="tabpanel" hidden></div>
+
       <div class="tab-panel panel-settings" id="panel-settings" role="tabpanel" hidden>
         <form class="settings" id="settingsForm" autocomplete="off"></form>
       </div>
@@ -157,5 +186,6 @@
 <div class="modal-root" id="modalRoot"></div>
 <div class="toasts" id="toasts" aria-live="polite"></div>
 <script src="/app.js"></script>
+<script src="/extras.js"></script>
 </body>
 </html>

@@ -58,6 +58,54 @@ public sealed class ServerInstance
     /// <summary>Steam app ID whose artwork to show. Null means use the game's own.</summary>
     public int? ArtAppId { get; set; }
     public DateTime AddedAt { get; set; } = DateTime.UtcNow;
+
+    // ----- experimental -----
+    /// <summary>Your own notes about the server (passwords for friends, mods, to-dos).</summary>
+    public string Notes { get; set; } = "";
+    /// <summary>Folders and files to back up (relative to the install dir, or absolute with %ENV% vars). Null: the game's suggestion.</summary>
+    public List<string>? BackupFolders { get; set; }
+    /// <summary>How many backups to keep; older ones are deleted after each new backup.</summary>
+    public int BackupKeep { get; set; } = 10;
+    /// <summary>Back up whenever the server stops.</summary>
+    public bool BackupOnStop { get; set; }
+    /// <summary>SteamCMD servers: download any update before starting.</summary>
+    public bool UpdateBeforeStart { get; set; }
+    /// <summary>Restarts, backups, commands and more at set times.</summary>
+    public List<ScheduledTask> Schedules { get; set; } = new();
+}
+
+/// <summary>Something Emberkeep does to a server on a schedule.</summary>
+public sealed class ScheduledTask
+{
+    public string Id { get; set; } = Guid.NewGuid().ToString("N")[..8];
+    public bool Enabled { get; set; } = true;
+    /// <summary>restart, stop, start, backup, command, update</summary>
+    public string Action { get; set; } = "restart";
+    /// <summary>"daily": at <see cref="Time"/> on <see cref="Days"/>; "interval": every <see cref="EveryMinutes"/>.</summary>
+    public string Kind { get; set; } = "daily";
+    public string Time { get; set; } = "05:00";
+    /// <summary>0 = Sunday … 6 = Saturday. Empty: every day.</summary>
+    public List<int> Days { get; set; } = new();
+    public int EveryMinutes { get; set; } = 60;
+    public string Command { get; set; } = "";
+    /// <summary>Restart/stop: tell players 10, 5 and 1 minute before (games with a broadcast command).</summary>
+    public bool Warn { get; set; } = true;
+    public DateTime? LastRun { get; set; }
+    public string? LastResult { get; set; }
+}
+
+/// <summary>Where Emberkeep tells you about crashes and other events.</summary>
+public sealed class NotificationSettings
+{
+    /// <summary>A Discord channel webhook URL (Channel settings → Integrations → Webhooks). Empty: off.</summary>
+    public string WebhookUrl { get; set; } = "";
+    /// <summary>Windows notifications from the tray icon.</summary>
+    public bool Windows { get; set; } = true;
+    public bool Crashes { get; set; } = true;
+    public bool StartStop { get; set; }
+    public bool Backups { get; set; } = true;
+    public bool Updates { get; set; } = true;
+    public bool Schedules { get; set; }
 }
 
 public sealed class AppSettings
@@ -87,6 +135,9 @@ public sealed class AppSettings
     public string SteamCmdPath { get; set; } = "";
     /// <summary>Folder new servers are installed into (each in its own subfolder). Empty: %USERPROFILE%Game Servers.</summary>
     public string InstallRoot { get; set; } = "";
+    /// <summary>Folder backups go into (one subfolder per server). Empty: %LOCALAPPDATA%EmberkeepBackups.</summary>
+    public string BackupRoot { get; set; } = "";
+    public NotificationSettings Notifications { get; set; } = new();
 }
 
 public sealed record LogLine(long Seq, DateTime Time, string Source, string Text);

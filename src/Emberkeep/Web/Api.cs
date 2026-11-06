@@ -19,11 +19,12 @@ namespace Emberkeep.Web;
 ///   .Need(perm)   ...and has that permission (for app-wide actions: has it at all)
 ///   .Full()       full access only (accounts, app settings)
 /// </summary>
-public static class Api
+public static partial class Api
 {
     public static void Map(WebApplication app, ServerManager mgr, WebHost host)
     {
         var api = app.MapGroup("/api");
+        Mgr = mgr;
 
         // ---------- who am I ----------
 
@@ -90,6 +91,8 @@ public static class Api
             if (string.IsNullOrWhiteSpace(body.Name)) return Error("The server needs a name.");
             next.Name = body.Name.Trim();
             next.AutoRestart = body.AutoRestart;
+            next.Notes = body.Notes ?? "";
+            next.UpdateBeforeStart = body.UpdateBeforeStart;
             next.StartWithEmberkeep = body.StartWithEmberkeep;
             next.CommandChannel = body.CommandChannel;
             next.StopMethod = body.StopMethod;
@@ -252,11 +255,12 @@ public static class Api
 
         // ---------- control ----------
 
-        api.MapPost("/servers/{id}/start", (string id) => host.Installer.Busy(id) ? Error("The server's files are being updated. Start it when that finishes.")
-            : Control(mgr, id, rt => { _ = rt.StartAsync(); })).Need(Permissions.Control);
-        api.MapPost("/servers/{id}/stop", (string id) => Control(mgr, id, rt => { _ = rt.StopAsync(); })).Need(Permissions.Control);
-        api.MapPost("/servers/{id}/restart", (string id) => host.Installer.Busy(id) ? Error("The server's files are being updated. Start it when that finishes.")
-            : Control(mgr, id, rt => { _ = rt.RestartAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/start", (string id, HttpContext ctx) => host.Installer.Busy(id) ? Error("The server's files are being updated. Start it when that finishes.")
+            : Control(mgr, id, rt => { rt.Actor = Actor(ctx); _ = host.Installer.StartAsync(rt); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/stop", (string id, HttpContext ctx) => Control(mgr, id, rt => { rt.Actor = Actor(ctx); _ = rt.StopAsync(); })).Need(Permissions.Control);
+        api.MapPost("/servers/{id}/restart", (string id, HttpContext ctx) => host.Installer.Busy(id) ? Error("The server's files are being updated. Start it when that finishes.")
+            : Control(mgr, id, rt => { rt.Actor = Actor(ctx); _ = rt.RestartAsync(); })).Need(Permissions.Control);
+        MapExtras(api, mgr, host);
         api.MapPost("/servers/{id}/kill", (string id) => Control(mgr, id, rt => rt.Kill())).Need(Permissions.Kill);
         api.MapPost("/servers/{id}/logs/clear", (string id) => Control(mgr, id, rt => rt.Logs.Clear())).Need(Permissions.Console);
 
@@ -564,6 +568,12 @@ public static class Api
                 if (scp.Length > 0 && !SteamCmd.SignedByValve(scp)) return Error("That steamcmd.exe isn't signed by Valve, so Emberkeep won't use it.");
                 s.SteamCmdPath = scp;
             }
+            if (req.BackupRoot is string broot)
+            {
+                broot = broot.Trim().Trim('"');
+                if (broot.Length > 0 && !Path.IsPathFullyQualified(broot)) return Error("Choose a full folder path for backups.");
+                s.BackupRoot = broot;
+            }
             if (req.InstallRoot is string root)
             {
                 root = root.Trim().Trim('"');
@@ -777,6 +787,7 @@ public static class Api
         uptimeSeconds = rt.StartedAt is DateTime t ? (long)(DateTime.Now - t).TotalSeconds : 0,
         cpu = Math.Round(rt.CpuPercent, 1),
         memory = rt.MemoryBytes,
+        players = rt.Players.Supported && rt.State == ServerState.Running ? new { count = rt.Players.Count, names = rt.Players.Names } : null,
         lastExitCode = rt.LastExitCode,
         lastError = rt.LastError,
         adopted = rt.Adopted,
@@ -817,6 +828,7 @@ public static class Api
             resolvedWorkingDirectory = canSettings ? rt.ResolveWorkingDirectory() : null,
             installDirExists = Directory.Exists(rt.Config.InstallDir),
             executableFound = ServerRecheck.ExecutableFound(rt),
+            portConflicts = Mgr != null ? PortConflicts(Mgr, rt) : new(),
             remoteConsole = rc == null ? null : new { rc.Host, rc.Port, hasPassword = rc.Password.Length > 0 },
             logFiles = canLaunch ? rt.LogFilePatterns() : Enumerable.Empty<string>(),
             join = JoinInfo.Resolve(rt.Config),
@@ -841,6 +853,8 @@ public static class Api
         steamCmdInUse = SteamCmd.ExePath(mgr.Settings),
         steamCmdInstalled = SteamCmd.IsInstalled(mgr.Settings),
         installRoot = Path.GetDirectoryName(host.Installer.SuggestedDir("x")) ?? "",
+        backupRoot = host.Backups.Root,
+        notifications = mgr.Settings.Notifications,
         dailyRestart = mgr.Settings.DailyRestart,
         dailyRestartTime = mgr.Settings.DailyRestartTime,
         pcRestart = PcRestartDto(host),
@@ -910,7 +924,7 @@ public static class Api
     private sealed record CommandRequest(string? Command);
     private sealed record SaveFileRequest(string? Path, string? Content, DateTime? ExpectedModified, bool Force);
     private sealed record SettingsRequest(int? Port, bool? RemoteAccess, bool? MinimizeToTray, bool? InternetAccess, bool? CheckForUpdates, bool? StartWithWindows,
-        bool? DailyRestart, string? DailyRestartTime, string? SteamCmdPath, string? InstallRoot);
+        bool? DailyRestart, string? DailyRestartTime, string? SteamCmdPath, string? InstallRoot, string? BackupRoot);
 
     private static object PcRestartDto(WebHost host)
     {

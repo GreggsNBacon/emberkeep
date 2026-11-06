@@ -32,8 +32,14 @@ public sealed class ServerManager : IDisposable
 
     public AppSettings Settings { get; private set; }
 
+    /// <summary>What happened and who did it (Overview → Activity).</summary>
+    public ActivityLog Activity { get; } = new();
+
     /// <summary>Raised when any server's state changes (start, stop, crash…).</summary>
     public event Action? Changed;
+
+    /// <summary>A server's process ended: (server, asked to stop?).</summary>
+    public event Action<ServerRuntime, bool>? ServerExited;
 
     public ServerManager()
     {
@@ -83,6 +89,19 @@ public sealed class ServerManager : IDisposable
     {
         var rt = new ServerRuntime(s);
         rt.Changed += () => Changed?.Invoke();
+        rt.StateChanged += (old, now) =>
+        {
+            if (now == ServerState.Running && old != ServerState.Running)
+                Activity.Add("start", rt.Adopted ? "Found running." : "Started.", rt.Config, rt.Actor, "good");
+            if (now == ServerState.Running) rt.Actor = null; // a stop is credited in Exited, below
+        };
+        rt.Exited += (requested, code) =>
+        {
+            try { ServerExited?.Invoke(rt, requested); } catch { }
+            if (requested) Activity.Add("stop", "Stopped.", rt.Config, rt.Actor);
+            if (rt.State == ServerState.Stopped) rt.Actor = null;
+            else Activity.Add("crash", code is int c && c != 0 ? $"Stopped unexpectedly (exit code {c})." : "Stopped unexpectedly.", rt.Config, null, "bad");
+        };
         _runtimes[s.Id] = rt;
         return rt;
     }

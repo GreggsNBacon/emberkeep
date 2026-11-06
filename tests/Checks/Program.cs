@@ -126,6 +126,37 @@ if (Directory.Exists(realAce))
     Check("same folder as a custom server: program / launcher", $"{asCustom.Executable} / {asCustom.Launcher}", "AssettoCorsaEVOServer.exe / ServerLauncher.exe");
 }
 
+Console.WriteLine("Schedules, players and in-game messages:");
+{
+    var now = new DateTime(2026, 11, 6, 10, 0, 0); // a Friday
+    var daily = new ScheduledTask { Kind = "daily", Time = "05:00" };
+    Check("daily 05:00, asked at 10:00 → tomorrow", Scheduler.Next(daily, now)?.ToString("ddd HH:mm") ?? "never", "Sat 05:00");
+    var weekdays = new ScheduledTask { Kind = "daily", Time = "05:00", Days = [1, 2, 3, 4, 5] };
+    Check("weekdays only, asked on Friday → Monday", Scheduler.Next(weekdays, now)?.ToString("ddd HH:mm") ?? "never", "Mon 05:00");
+    var justDue = new ScheduledTask { Kind = "daily", Time = "09:59" };
+    Check("due a minute ago and not run yet → now", Scheduler.Next(justDue, now)?.ToString("ddd HH:mm") ?? "never", "Fri 09:59");
+    justDue.LastRun = now.AddSeconds(-30).ToUniversalTime();
+    Check("…and once it has run → tomorrow", Scheduler.Next(justDue, now)?.ToString("ddd HH:mm") ?? "never", "Sat 09:59");
+    var every = new ScheduledTask { Kind = "interval", EveryMinutes = 90, LastRun = now.AddMinutes(-30).ToUniversalTime() };
+    Check("every 90 min, last run 30 min ago → in an hour", Scheduler.Next(every, now)?.ToString("HH:mm") ?? "never", "11:00");
+    Check("disabled → never", Scheduler.Next(new ScheduledTask { Enabled = false }, now)?.ToString() ?? "never", "never");
+
+    var mc = new PlayerTracker();
+    mc.Configure(GameExtras.For("minecraft-java"));
+    mc.OnLine("[10:58:34] [Server thread/INFO]: Alex_Builds joined the game");
+    mc.OnLine("[10:58:34] [Server thread/INFO]: mossy_steve joined the game");
+    mc.OnLine("[10:58:35] [Server thread/INFO]: <mossy_steve> Alex_Builds joined the game lol"); // chat isn't a join
+    mc.OnLine("[11:02:00] [Server thread/INFO]: Alex_Builds left the game");
+    Check("Minecraft players from the log", string.Join(",", mc.Names), "mossy_steve");
+    var pal = new PlayerTracker();
+    pal.Configure(GameExtras.For("palworld"));
+    pal.SetFromPalworld("name,playeruid,steamid\nGreg,123,7656\nSam,456,7657\n");
+    Check("Palworld players from ShowPlayers", string.Join(",", pal.Names), "Greg,Sam");
+    Check("Palworld broadcast has no spaces", GameExtras.BroadcastCommand("palworld", "Server restarting in 5 minutes") ?? "none", "Broadcast Server_restarting_in_5_minutes");
+    Check("7 Days broadcast is quoted", GameExtras.BroadcastCommand("7dtd", "Back in 1 minute") ?? "none", "say \"Back in 1 minute\"");
+    Check("Valheim can't broadcast", GameExtras.BroadcastCommand("valheim", "hi") ?? "none", "none");
+}
+
 if (args.Contains("--online"))
 {
     Console.WriteLine("Steam art lookup by name (live store search):");

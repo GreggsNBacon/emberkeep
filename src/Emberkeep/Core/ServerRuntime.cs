@@ -24,7 +24,31 @@ public sealed class ServerRuntime
     private TimeSpan _lastCpu;
     private DateTime _lastSample;
 
-    public ServerRuntime(ServerInstance config) { Config = config; }
+    public ServerRuntime(ServerInstance config)
+    {
+        Config = config;
+        Players.Configure(GameExtras.For(config.GameId));
+        Players.Updated += () => Changed?.Invoke();
+        Logs.LineAdded += l => { if (l.Source is "out" or "err" or "file" && Players.OnLine(l.Text)) Changed?.Invoke(); };
+    }
+
+    /// <summary>Who is on the server (games Emberkeep can count players for).</summary>
+    public PlayerTracker Players { get; } = new();
+
+    /// <summary>Who asked for the next start or stop (an account, "schedule", …), for the activity log. Used once.</summary>
+    public string? Actor { get; set; }
+
+    /// <summary>(previous state, new state)</summary>
+    public event Action<ServerState, ServerState>? StateChanged;
+
+    /// <summary>The process ended: (asked to stop?, exit code). False means it crashed or closed by itself.</summary>
+    public event Action<bool, int?>? Exited;
+
+    private readonly object _histLock = new();
+    private readonly List<(DateTime T, double Cpu, long Mem)> _history = new();
+
+    /// <summary>CPU and memory over the last hour, one point every 10 seconds.</summary>
+    public (DateTime T, double Cpu, long Mem)[] History { get { lock (_histLock) return [.. _history]; } }
 
     public ServerInstance Config { get; set; }
     public GameDefinition Game => GameCatalog.Get(Config.GameId);
@@ -44,8 +68,12 @@ public sealed class ServerRuntime
 
     private void SetState(ServerState s)
     {
+        var old = State;
         State = s;
+        if (s == ServerState.Running && old != ServerState.Running) Players.Configure(GameExtras.For(Config.GameId));
+        if (s == ServerState.Stopped) Players.Reset();
         Changed?.Invoke();
+        if (old != s) try { StateChanged?.Invoke(old, s); } catch { }
     }
 
     // ---------- path helpers ----------
@@ -213,6 +241,7 @@ public sealed class ServerRuntime
             SetState(ServerState.Stopped);
         }
         try { p.Dispose(); } catch { }
+        try { Exited?.Invoke(wasRequested, code); } catch { }
 
         if (!wasRequested && Config.AutoRestart)
         {
@@ -320,6 +349,15 @@ public sealed class ServerRuntime
     }
 
     // ---------- commands ----------
+
+    /// <summary>Asks the server something over RCON/Telnet without putting it in the console log (e.g. the player list).</summary>
+    public async Task<string?> QueryQuietAsync(string command)
+    {
+        if (State != ServerState.Running || Config.CommandChannel is not (CommandChannel.Rcon or CommandChannel.Telnet)) return null;
+        var rc = ResolveRemoteConsole();
+        if (rc == null) return null;
+        return Config.CommandChannel == CommandChannel.Rcon ? await RconClient.ExecuteAsync(rc, command) : await TelnetClient.ExecuteAsync(rc, command);
+    }
 
     public async Task<string?> SendCommandAsync(string command)
     {
@@ -449,5 +487,10 @@ public sealed class ServerRuntime
             if (wall > 0) CpuPercent = Math.Clamp((cpu - _lastCpu).TotalMilliseconds / wall / Environment.ProcessorCount * 100, 0, 100);
         }
         _lastCpu = cpu; _lastSample = now; MemoryBytes = mem;
+        lock (_histLock)
+        {
+            if (_history.Count == 0 || now - _history[^1].T >= TimeSpan.FromSeconds(10)) _history.Add((now, CpuPercent, mem));
+            while (_history.Count > 0 && now - _history[0].T > TimeSpan.FromHours(1)) _history.RemoveAt(0);
+        }
     }
 }
