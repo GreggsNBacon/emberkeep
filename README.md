@@ -1,4 +1,6 @@
-# Emberkeep
+<p align="center"><img src="branding/source/emberkeep.svg" width="128" alt="Emberkeep logo: an ember flame with a server rack inside"></p>
+
+<h1 align="center">Emberkeep</h1>
 
 A Windows app for running game servers for you and your friends. Run `Emberkeep.exe` on the PC that hosts the servers. You can then manage them from that PC or from any browser on your network.
 
@@ -81,7 +83,7 @@ The installer's source is in `installer/`. `Package.wxs` defines the package. Th
 - **`tests/Checks`**: quick checks of name tidying, router ports read from config files and launch arguments, and (with `--online`) the Steam art lookup. Run with `dotnet run --project testsChecks`.
 - **`tests/FakeLauncher`**: a windowed stand-in for a game's launcher that starts `FakeServer` with Assetto Corsa EVO-style encoded settings, used to test Learn from launcher.
 
-## Watchfire
+## <img src="branding/source/watchfire.svg" width="26" alt="" valign="middle"> Watchfire
 
 Watchfire (`..\Watchfire`) is a separate app for forwarding game ports. Emberkeep finds a running copy through `%LOCALAPPDATA%\Watchfire\instance.json` and uses its local API (`/api/hello`, `/api/forwarded`, `/api/forward`, `/api/remove`). Forwards Emberkeep makes are named `Emberkeep: <server name>` in Watchfire. `build.ps1` builds Watchfire from source when Node is available (on PATH, or `$env:EMBERKEEP_NODE`) and bundles it into the installer, which puts it in `%LOCALAPPDATA%\Programs\Watchfire`.
 
