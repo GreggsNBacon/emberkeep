@@ -2,15 +2,20 @@ using System;
 using System.Collections.Generic;
 using System.Diagnostics;
 using System.IO;
+using System.Linq;
 using System.Runtime.InteropServices;
 using System.Text;
 using System.Threading;
 
 namespace Emberkeep.Core;
 
-/// <summary>Win32 helpers: Ctrl+C delivery, process tree enumeration and image paths.</summary>
+/// <summary>
+/// Process helpers: Ctrl+C delivery, process tree enumeration and image paths. Win32 on Windows; /proc and signals on Linux.
+/// </summary>
 public static class Native
 {
+    [DllImport("libc", EntryPoint = "kill", SetLastError = true)] private static extern int sys_kill(int pid, int sig);
+    private const int SIGINT = 2;
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool AttachConsole(uint pid);
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool FreeConsole();
     [DllImport("kernel32.dll", SetLastError = true)] private static extern bool GenerateConsoleCtrlEvent(uint ctrlEvent, uint groupId);
@@ -39,11 +44,19 @@ public static class Native
     /// Clears the "ignore Ctrl+C" flag, which child processes inherit. Without this, a Emberkeep launched from some
     /// shells would start servers that can never be stopped gracefully. Call while holding <see cref="ConsoleLock"/>.
     /// </summary>
-    public static void AllowCtrlCInChildren() => SetConsoleCtrlHandler(IntPtr.Zero, false);
+    public static void AllowCtrlCInChildren() { if (OperatingSystem.IsWindows()) SetConsoleCtrlHandler(IntPtr.Zero, false); }
 
     /// <summary>Sends Ctrl+C to a console process, the same as pressing it in the server window.</summary>
     public static bool SendCtrlC(int pid)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // Linux: SIGINT to the server and everything it started, as Ctrl+C in a terminal does to the foreground
+            // process group (a launch script such as PalServer.sh doesn't pass the signal on to the game itself).
+            bool any = false;
+            foreach (var p in ProcessTree(pid)) any |= sys_kill(p, SIGINT) == 0;
+            return any;
+        }
         lock (ConsoleLock)
         {
             FreeConsole();
@@ -67,6 +80,22 @@ public static class Native
     public static Dictionary<int, int> ParentMap()
     {
         var map = new Dictionary<int, int>();
+        if (!OperatingSystem.IsWindows())
+        {
+            // /proc/<pid>/stat: "pid (name) state ppid …"; the name can contain spaces and brackets, so read after the last ')'.
+            foreach (var dir in Directory.EnumerateDirectories("/proc"))
+            {
+                if (!int.TryParse(Path.GetFileName(dir), out int pid)) continue;
+                try
+                {
+                    var stat = File.ReadAllText(Path.Combine(dir, "stat"));
+                    var rest = stat[(stat.LastIndexOf(')') + 2)..].Split(' ');
+                    if (rest.Length > 1 && int.TryParse(rest[1], out int ppid)) map[pid] = ppid;
+                }
+                catch { }
+            }
+            return map;
+        }
         var snap = CreateToolhelp32Snapshot(0x2 /* TH32CS_SNAPPROCESS */, 0);
         if (snap == IntPtr.Zero || snap == new IntPtr(-1)) return map;
         try
@@ -108,6 +137,10 @@ public static class Native
 
     public static string? ImagePath(int pid)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            try { return new FileInfo($"/proc/{pid}/exe").LinkTarget; } catch { return null; }
+        }
         var h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
         if (h == IntPtr.Zero) return null;
         try
@@ -124,6 +157,16 @@ public static class Native
     /// <summary>The full command line another process was started with (Windows 8.1+), or null if it can't be read.</summary>
     public static string? CommandLine(int pid)
     {
+        if (!OperatingSystem.IsWindows())
+        {
+            // NUL-separated arguments; quote the ones with spaces so it reads like a command line.
+            try
+            {
+                var parts = File.ReadAllText($"/proc/{pid}/cmdline").TrimEnd('\0').Split('\0');
+                return parts.Length == 0 || parts[0].Length == 0 ? null : string.Join(' ', parts.Select(a => a.Contains(' ') ? $"\"{a}\"" : a));
+            }
+            catch { return null; }
+        }
         var h = OpenProcess(0x1000 /* PROCESS_QUERY_LIMITED_INFORMATION */, false, pid);
         if (h == IntPtr.Zero) return null;
         try
@@ -147,6 +190,7 @@ public static class Native
     /// <summary>True if the exe is a windowed (GUI) program rather than a console one, read from its PE header.</summary>
     public static bool? IsGuiExe(string path)
     {
+        if (!OperatingSystem.IsWindows()) return null; // Linux programs have no console/windowed flag
         try
         {
             using var fs = File.OpenRead(path);

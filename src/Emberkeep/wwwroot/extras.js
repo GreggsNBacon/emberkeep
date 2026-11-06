@@ -187,7 +187,7 @@ async function loadBackups() {
   panel.replaceChildren(h('div', { class: 'tab-scroll' },
     h('div', { class: 'toolbar' },
       canMake ? h('button', { class: 'btn btn-primary', type: 'button', disabled: d.busy || !exists.length || null, onclick: () => backupNow(s.id) }, d.busy ? 'Backing up…' : 'Back up now') : null,
-      isLocal ? h('button', { class: 'btn', type: 'button', onclick: () => api('POST', `/api/servers/${s.id}/backups/browse`).catch(e => toast(e.message, 'bad')) }, 'Open backup folder') : null,
+      canBrowseHost() ? h('button', { class: 'btn', type: 'button', onclick: () => api('POST', `/api/servers/${s.id}/backups/browse`).catch(e => toast(e.message, 'bad')) }, 'Open backup folder') : null,
       h('span', { class: 'spacer' }),
       h('label', { class: 'inline dim' }, 'Keep the newest', keep),
       h('label', { class: 'inline dim' }, toggleEl(d.onStop, on => saveSettings({ onStop: on })), 'Back up when the server stops')),
@@ -450,7 +450,7 @@ function extrasAppGroups(st, putSettings) {
     h('h2', {}, 'Notifications'),
     h('p', {}, 'Hear about crashes and other events even when Emberkeep is in the tray, or away from the PC.'),
     h('div', { class: 'set-rows' },
-      h('div', { class: 'set-row' }, h('label', {}, 'Windows notifications'),
+      h('div', { class: 'set-row win-only' }, h('label', {}, 'Windows notifications'),
         h('div', { class: 'inline' }, toggleEl(n.windows, on => { n.windows = on; saveN(); }), h('span', { class: 'dim' }, 'Shown from Emberkeep\'s tray icon on this PC'))),
       h('div', { class: 'set-row' }, h('label', {}, 'Discord channel', h('span', { class: 'label-sub' }, 'Webhook URL')),
         h('div', {}, h('div', { class: 'row gap' }, hook, h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {

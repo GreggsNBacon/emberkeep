@@ -19,6 +19,7 @@ public static class WindowsStartup
     /// <summary>The program the entry starts, or null when there is none.</summary>
     public static string? RegisteredCommand()
     {
+        if (!Platform.IsWindows) return null; // Linux: systemd starts Emberkeep (see install.sh)
         using var key = Registry.CurrentUser.OpenSubKey(RunKey);
         return key?.GetValue(Name) as string;
     }
@@ -28,6 +29,7 @@ public static class WindowsStartup
 
     public static void Set(bool on)
     {
+        if (!Platform.IsWindows) throw new InvalidOperationException("On Linux, Emberkeep starts with the system through its systemd service (sudo systemctl enable emberkeep).");
         using var key = Registry.CurrentUser.CreateSubKey(RunKey, writable: true);
         if (on) key.SetValue(Name, Command, RegistryValueKind.String);
         else if (key.GetValue(Name) != null) key.DeleteValue(Name, throwOnMissingValue: false);

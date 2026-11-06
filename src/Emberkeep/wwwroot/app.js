@@ -106,6 +106,10 @@ function stateLabel(s) {
 }
 // The desktop window signs in with a launch token, so signing out there would strand it.
 const isLocal = ['127.0.0.1', 'localhost', '[::1]'].includes(location.hostname);
+// The Linux edition runs as a service without a desktop: no File Explorer, tray, Watchfire or Windows startup.
+const onWindows = () => (state.me?.os || 'windows') === 'windows';
+// Browse files opens File Explorer on the host, so only from the host's own browser, and only on Windows.
+const canBrowseHost = () => isLocal && onWindows();
 const game = id => state.games[id] || state.games.generic || { name: id, badge: '?', color: '#8a94a6' };
 const current = () => state.servers.find(s => s.id === state.selectedId);
 const isCrashed = s => s.state === 'Stopped' && (s.lastError || (s.lastExitCode != null && s.lastExitCode !== 0));
@@ -530,7 +534,7 @@ function renderHeader() {
   $('#headName').textContent = s.name;
   $('#headGame').textContent = g.name;
   $('#headPath').textContent = s.installDir;
-  $('#browseBtn').hidden = !isLocal || state.detail?.installDirExists === false;
+  $('#browseBtn').hidden = !canBrowseHost() || state.detail?.installDirExists === false;
   document.title = `${s.name} | Emberkeep`;
 
   const st = $('#statState');
@@ -1235,7 +1239,7 @@ function renderSettings() {
   const readOnly = value => h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, value);
 
   const ADV_ROWS = new Set(['Executable', 'Launcher', 'Launch arguments', 'Working folder', 'Environment']);
-  const row = (label, control, help) => h('div', { class: `set-row${ADV_ROWS.has(label) ? ' adv' : ''}` }, h('label', {}, label), h('div', {}, control, help ? h('div', { class: 'help' }, help) : null));
+  const row = (label, control, help) => h('div', { class: `set-row${ADV_ROWS.has(label) ? ' adv' : ''}${label === 'Launcher' ? ' win-only' : ''}` }, h('label', {}, label), h('div', {}, control, help ? h('div', { class: 'help' }, help) : null));
   const text = (key, opts = {}) => {
     const i = h('input', { class: `input${opts.mono ? ' mono' : ''}`, type: opts.type || 'text', spellcheck: 'false', placeholder: opts.placeholder || '' });
     i.value = opts.get ? opts.get() : (c[key] ?? '');
@@ -1448,7 +1452,7 @@ function serverMenu(anchor) {
   if (!s) return;
   const stopped = s.state === 'Stopped';
   const items = [];
-  if (isLocal) items.push({ label: 'Browse files', sub: 'Open the server folder in File Explorer', onClick: browseFiles });
+  if (canBrowseHost()) items.push({ label: 'Browse files', sub: 'Open the server folder in File Explorer', onClick: browseFiles });
   if (can('launch')) items.push({ label: 'Check files again', disabled: !stopped,
     sub: stopped ? 'Look for the game, server program and config files again, e.g. after a download finishes' : 'Stop the server first',
     onClick: recheckServer });
@@ -1628,7 +1632,7 @@ function installPanel(panel, m) {
   const search = h('input', { class: 'input', type: 'search', placeholder: 'Search games, e.g. Valheim', spellcheck: 'false', autofocus: true, 'aria-label': 'Search games' });
   const list = h('div', { class: 'cand-list install-list' });
   const form = h('div');
-  const games = Object.values(state.games).filter(g => g.id !== 'generic' && g.steamAppIds?.length).sort((a, b) => a.name.localeCompare(b.name));
+  const games = Object.values(state.games).filter(g => g.id !== 'generic' && g.steamAppIds?.length).sort((a, b) => ((a.windowsOnly ? 1 : 0) - (b.windowsOnly ? 1 : 0)) || a.name.localeCompare(b.name)); // Linux: Windows-only games last
 
   const pick = target => { // target: { gameId?, appId, title }
     list.hidden = true; search.closest('.install-search').hidden = true;
@@ -1640,11 +1644,13 @@ function installPanel(panel, m) {
     list.replaceChildren();
     const found = games.filter(g => !q || g.name.toLowerCase().includes(q) || g.id.includes(q));
     for (const g of found) {
-      const el = h('div', { class: `cand${g.steamCmdAnonymous ? '' : ' added'}` },
+      const ok = g.steamCmdAnonymous && !g.windowsOnly;
+      const el = h('div', { class: `cand${ok ? '' : ' added'}` },
         candArt(g.id, g.artAppId),
         h('div', { class: 'meta' }, h('div', { class: 'name' }, g.name),
-          h('span', { class: 'dim', style: { fontSize: '12.5px' } }, g.steamCmdAnonymous ? 'Free server download from Steam' : 'Needs a Steam account that owns the game: install it through Steam, then use Found on this PC')),
-        g.steamCmdAnonymous ? h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => pick({ gameId: g.id, appId: g.steamAppIds[0], title: g.name }) }, 'Install') : null);
+          h('span', { class: 'dim', style: { fontSize: '12.5px' } }, g.windowsOnly ? 'Windows only: this game has no Linux server'
+            : g.steamCmdAnonymous ? 'Free server download from Steam' : 'Needs a Steam account that owns the game: install it through Steam, then use Found on this PC')),
+        ok ? h('button', { class: 'btn btn-small btn-primary', type: 'button', onclick: () => pick({ gameId: g.id, appId: g.steamAppIds[0], title: g.name }) }, 'Install') : null);
       el.style.setProperty('--game', g.color);
       list.append(el);
     }
@@ -2069,13 +2075,17 @@ function updateStatusText(u) {
 async function installUpdate(u) {
   const running = state.servers.filter(s => s.state && s.state !== 'Stopped');
   const what = running.length === 1 ? running[0].name : `your ${running.length} running servers`;
-  const msg = (running.length ? `The installer closes Emberkeep, which safely stops ${what}. ` : 'The installer closes Emberkeep while it updates. ')
-    + 'Its last page can start Emberkeep again.' + (isLocal ? '' : ' The installer opens on the host PC.');
+  const msg = !onWindows()
+    ? (running.length ? `Emberkeep downloads the update, safely stops ${what} and restarts with the new version. ` : 'Emberkeep downloads the update and restarts with the new version. ')
+      + 'This page reconnects by itself.'
+    : (running.length ? `The installer closes Emberkeep, which safely stops ${what}. ` : 'The installer closes Emberkeep while it updates. ')
+      + 'Its last page can start Emberkeep again.' + (isLocal ? '' : ' The installer opens on the host PC.');
   if (!(await confirmDialog(`Install Emberkeep ${u.available.version}?`, msg, { okText: 'Download and install' }))) return;
   toast('Downloading the update…');
   try {
-    await api('POST', '/api/update/install');
-    toast(isLocal ? 'The installer is open.' : 'The installer is open on the host PC.', 'good');
+    const r = await api('POST', '/api/update/install');
+    if (r.restarting) toast(r.underSystemd ? 'Updated. Emberkeep is restarting…' : 'Updated. Emberkeep stopped: start it again to use the new version.', 'good');
+    else toast(isLocal ? 'The installer is open.' : 'The installer is open on the host PC.', 'good');
   } catch (e) { toast(e.message, 'bad'); }
 }
 
@@ -2147,7 +2157,7 @@ async function appSettingsDialog() {
         .catch(e => toast(e.message, 'bad')));
       const next = st.pcRestart?.nextDaily ? new Date(st.pcRestart.nextDaily) : null;
       const nextText = next ? `On. Next restart: ${next.toLocaleString([], { weekday: 'long', hour: '2-digit', minute: '2-digit' })}.` : 'Off.';
-      return h('div', { class: 'set-group' },
+      return h('div', { class: 'set-group win-only' },
         h('h2', {}, 'Restart this PC'),
         h('p', {}, 'Emberkeep stops every running server the normal way first, so worlds are saved, then restarts Windows. A restart can be cancelled until the servers start stopping.'),
         !st.startWithWindows ? h('div', { class: 'notice warn', style: { margin: '0 0 12px' } },
@@ -2261,12 +2271,14 @@ async function appSettingsDialog() {
         line.replaceChildren(
           h('span', {}, ph.running ? `Watchfire ${ph.version || ''} is running. Emberkeep opens servers' ports through it.`
             : ph.installed ? 'Watchfire is installed. Emberkeep starts it in the background when a server\'s ports need opening.'
-            : 'Watchfire isn\'t installed, so Emberkeep opens ports itself with UPnP.'),
+            : onWindows() ? 'Watchfire isn\'t installed, so Emberkeep opens ports itself with UPnP.'
+            : 'Emberkeep opens ports itself with UPnP. Your router needs UPnP turned on.'),
           ph.installed ? h('button', { class: 'btn btn-small', type: 'button', onclick: openWatchfire }, 'Open Watchfire') : null);
       }).catch(e => line.replaceChildren(h('span', { class: 'dim' }, e.message)));
       return h('div', { class: 'set-group' },
         h('h2', {}, 'Port forwarding for game servers'),
-        h('p', {}, 'Each server\'s Router ports control (next to its join address) opens the ports friends need. Watchfire also works on its own, so you can see and manage every forward there too.'),
+        h('p', {}, 'Each server\'s Router ports control (next to its join address) opens the ports friends need.'
+          + (onWindows() ? ' Watchfire also works on its own, so you can see and manage every forward there too.' : ' On a server with a firewall (ufw, firewalld), allow the game\'s ports there too.')),
         h('div', { class: 'set-rows' }, h('div', { class: 'set-row' }, h('label', {}, 'Handled by'), line)));
     };
 
@@ -2326,7 +2338,16 @@ async function appSettingsDialog() {
       internetGroup(),
       portForwardGroup(),
       discordGroup(),
-      h('div', { class: 'set-group' },
+      // Linux edition: a service, so startup is systemd's job.
+      h('div', { class: 'set-group linux-only' },
+        h('h2', {}, 'Service'),
+        h('p', {}, 'On Linux, Emberkeep runs as the emberkeep systemd service, so it starts with the machine and restarts if it stops. Servers set to Start with Emberkeep (in their Settings) start with it.'),
+        h('div', { class: 'set-rows' },
+          h('div', { class: 'set-row' }, h('label', {}, 'Commands'),
+            h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } },
+              'sudo systemctl status emberkeep · sudo systemctl restart emberkeep · sudo journalctl -u emberkeep -f · emberkeep-link')),
+          h('div', { class: 'set-row' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)))),
+      h('div', { class: 'set-group win-only' },
         h('h2', {}, 'Window and startup'),
         h('div', { class: 'set-rows' },
           h('div', { class: 'set-row' }, h('label', {}, 'Start with Windows'),
@@ -2836,6 +2857,8 @@ function wire() {
 function applyAccount() {
   const me = state.me;
   if (!me) return;
+  // Linux edition: hides what only Windows has (marked .win-only), see app.css.
+  document.documentElement.dataset.os = me.os || 'windows';
   $('#addServerBtn').hidden = !me.canAddServers;
   $('#emptyScanBtn').hidden = !me.canAddServers;
   $('#emptyFolderBtn').hidden = !me.canAddServers;

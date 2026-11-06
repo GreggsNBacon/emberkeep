@@ -20,6 +20,18 @@ To update, download the newest release and run it: it upgrades in place and keep
 
 Just want the port forwarding? Watchfire has its own download in the [Watchfire repo](https://github.com/GreggsNBacon/watchfire/releases/latest).
 
+### Linux (preview)
+
+For a dedicated server box: **Emberkeep-*version*-linux-x64.tar.gz** runs Emberkeep as a systemd service, and you use it from a browser. Same features, minus the Windows-only ones (the window and tray, Watchfire, Start with Windows, restarting the PC, Browse files).
+
+```sh
+tar xzf Emberkeep-<version>-linux-x64.tar.gz
+cd emberkeep-<version>
+sudo ./install.sh
+```
+
+The installer prints a link that signs you in as the host. Emberkeep only listens on 127.0.0.1 at first, so from another computer forward the port over SSH (`ssh -L 8765:127.0.0.1:8765 you@server`) and open the link there; then create accounts and turn on remote access in App settings. `emberkeep-link` prints the link again. Installing game servers needs SteamCMD's 32-bit libraries (`sudo apt install lib32gcc-s1`). Enshrouded, V Rising, ARK: Survival Ascended, Sons of the Forest, Conan Exiles and Assetto Corsa EVO only have Windows servers. See `linux/README.txt` for more.
+
 ## What it does
 
 - **Finds your servers.** It scans every Steam library, including dedicated servers installed from Steam's Tools library. You can also add any folder, such as a Minecraft server, and Emberkeep recognises the game from the files inside.
@@ -76,6 +88,8 @@ This produces:
 
 - `publish\Emberkeep.exe`: the app as a single self-contained file that doesn't need a separate .NET install. You can run it as-is.
 - `dist\Emberkeep-<version>-Setup.msi`: the installer to give to friends.
+
+For Linux, `.\build-linux.ps1` cross-compiles `dist\Emberkeep-<version>-linux-x64.tar.gz` (needs Node for the tarball).
 
 The window uses the Microsoft Edge WebView2 Runtime, which is built into Windows 11.
 

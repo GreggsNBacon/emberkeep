@@ -8,7 +8,7 @@ using System.Text.RegularExpressions;
 namespace Emberkeep.Core;
 
 /// <summary>A template describing how a type of game server is laid out and controlled.</summary>
-public sealed class GameDefinition
+public sealed record GameDefinition
 {
     public required string Id { get; init; }
     public required string Name { get; init; }
@@ -46,13 +46,19 @@ public sealed class GameDefinition
     public Func<string, RemoteConsoleSettings?>? ReadRemoteConsole { get; init; }
     /// <summary>(source, destination) relative to install dir: a defaults file that can seed a missing config.</summary>
     public (string Source, string Destination)? DefaultConfigTemplate { get; init; }
+    /// <summary>Linux edition: the game has no Linux server, so Emberkeep can't run or install it there.</summary>
+    public bool WindowsOnly { get; init; }
 }
 
-public static class GameCatalog
+public static partial class GameCatalog
 {
     private const string LocalLow = "%USERPROFILE%\\AppData\\LocalLow";
 
-    public static readonly IReadOnlyList<GameDefinition> All = new List<GameDefinition>
+    /// <summary>Every game Emberkeep knows, as this system runs it (the Linux edition swaps in Linux server programs and paths).</summary>
+    public static IReadOnlyList<GameDefinition> All => _all ??= Platform.IsWindows ? Defined : Defined.Select(ForLinux).ToList();
+    private static IReadOnlyList<GameDefinition>? _all;
+
+    private static readonly IReadOnlyList<GameDefinition> Defined = new List<GameDefinition>
     {
         new()
         {
@@ -385,7 +391,7 @@ public static class GameCatalog
         }
         // A folder with server.properties AND bedrock_server.exe is Bedrock, not Java.
         if (hits.Any(h => h.Game.Id == "minecraft-bedrock")) hits.RemoveAll(h => h.Game.Id == "minecraft-java");
-        if (hits.Any(h => h.Game.Id == "minecraft-java") && !Directory.EnumerateFiles(dir, "*.jar").Any() && !File.Exists(Path.Combine(dir, "run.bat")))
+        if (hits.Any(h => h.Game.Id == "minecraft-java") && !Directory.EnumerateFiles(dir, "*.jar").Any() && !File.Exists(Path.Combine(dir, "run.bat")) && !File.Exists(Path.Combine(dir, "run.sh")))
             hits.RemoveAll(h => h.Game.Id == "minecraft-java" && !File.Exists(Path.Combine(dir, "server.properties")));
         return hits.OrderByDescending(h => h.Score).Select(h => h.Game).ToList();
     }
@@ -413,7 +419,7 @@ public static class GameCatalog
             var (mExe, mArgs) = MinecraftJava.DefaultLaunch(installDir);
             exe = mExe; inst.Arguments = mArgs;
         }
-        var exes = Directory.Exists(installDir) ? Directory.EnumerateFiles(installDir, "*.exe").ToList() : new List<string>();
+        var exes = Directory.Exists(installDir) ? ProgramsIn(installDir) : new List<string>();
         if (string.IsNullOrEmpty(exe) && g.Id == "generic")
         {
             // Prefer console programs (servers) over windowed ones (launchers, configurators), then names with "server".
@@ -441,6 +447,7 @@ public static class ConfigReaders
 {
     public static Dictionary<string, string>? PalworldOptions(string path)
     {
+        path = GameCatalog.OsPath(path);
         if (!File.Exists(path)) return null;
         var text = File.ReadAllText(path);
         var m = Regex.Match(text, @"OptionSettings=\((.*)\)\s*$", RegexOptions.Multiline);
@@ -474,6 +481,7 @@ public static class ConfigReaders
 
     public static Dictionary<string, string> IniValues(string path)
     {
+        path = GameCatalog.OsPath(path);
         var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         if (!File.Exists(path)) return d;
         foreach (var raw in File.ReadLines(path))
@@ -488,6 +496,7 @@ public static class ConfigReaders
 
     public static RemoteConsoleSettings? IniRcon(string path, string portKey, string passwordKey, int defaultPort)
     {
+        path = GameCatalog.OsPath(path);
         var v = IniValues(path);
         if (v.Count == 0) return null;
         return new RemoteConsoleSettings
@@ -499,6 +508,7 @@ public static class ConfigReaders
 
     public static RemoteConsoleSettings? JsonRcon(string path, string objectName)
     {
+        path = GameCatalog.OsPath(path);
         if (!File.Exists(path)) return null;
         try
         {
@@ -516,6 +526,7 @@ public static class ConfigReaders
 
     public static Dictionary<string, string>? XmlProperties(string path)
     {
+        path = GameCatalog.OsPath(path);
         if (!File.Exists(path)) return null;
         var d = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
         foreach (Match m in Regex.Matches(File.ReadAllText(path), "<property\\s+name=\"([^\"]+)\"\\s+value=\"([^\"]*)\""))
@@ -529,8 +540,9 @@ public static class MinecraftJava
     /// <summary>Works out how to launch a Java server: modern Forge/NeoForge use run.bat, everything else is java -jar.</summary>
     public static (string Exe, string Args) DefaultLaunch(string dir)
     {
-        if (File.Exists(Path.Combine(dir, "run.bat")) && File.Exists(Path.Combine(dir, "user_jvm_args.txt")))
-            return ("run.bat", "nogui");
+        string run = Platform.IsWindows ? "run.bat" : "run.sh";
+        if (File.Exists(Path.Combine(dir, run)) && File.Exists(Path.Combine(dir, "user_jvm_args.txt")))
+            return (run, "nogui");
 
         string jar = "server.jar";
         if (Directory.Exists(dir))
@@ -549,6 +561,18 @@ public static class MinecraftJava
 
     public static string? FindJava()
     {
+        if (!Platform.IsWindows)
+        {
+            var jh = System.Environment.GetEnvironmentVariable("JAVA_HOME");
+            if (!string.IsNullOrEmpty(jh) && File.Exists(Path.Combine(jh, "bin", "java"))) return Path.Combine(jh, "bin", "java");
+            foreach (var p in (System.Environment.GetEnvironmentVariable("PATH") ?? "").Split(':', StringSplitOptions.RemoveEmptyEntries))
+                if (File.Exists(Path.Combine(p, "java"))) return "java";
+            // Distribution packages (apt, dnf) put JDKs here; take the newest.
+            if (Directory.Exists("/usr/lib/jvm"))
+                return Directory.EnumerateDirectories("/usr/lib/jvm").Where(d => File.Exists(Path.Combine(d, "bin", "java")))
+                    .OrderByDescending(d => d, StringComparer.Ordinal).Select(d => Path.Combine(d, "bin", "java")).FirstOrDefault();
+            return null;
+        }
         var home = System.Environment.GetEnvironmentVariable("JAVA_HOME");
         if (!string.IsNullOrEmpty(home) && File.Exists(Path.Combine(home, "bin", "java.exe"))) return Path.Combine(home, "bin", "java.exe");
         foreach (var p in (System.Environment.GetEnvironmentVariable("PATH") ?? "").Split(';', StringSplitOptions.RemoveEmptyEntries))

@@ -15,6 +15,15 @@ public static class SteamScanner
 {
     public static string? FindSteamRoot()
     {
+        if (!Platform.IsWindows)
+        {
+            // Linux: Steam's usual homes (native, the ~/.steam link, Flatpak), then SteamCMD's own steamapps.
+            var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+            foreach (var guess in new[] { Path.Combine(home, ".local", "share", "Steam"), Path.Combine(home, ".steam", "steam"),
+                         Path.Combine(home, ".var", "app", "com.valvesoftware.Steam", ".local", "share", "Steam"), Path.Combine(home, "Steam"), SteamCmd.OwnDir })
+                if (Directory.Exists(Path.Combine(guess, "steamapps"))) return Path.GetFullPath(guess);
+            return null;
+        }
         string? p = Registry.GetValue(@"HKEY_CURRENT_USER\Software\Valve\Steam", "SteamPath", null) as string
                  ?? Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\WOW6432Node\Valve\Steam", "InstallPath", null) as string
                  ?? Registry.GetValue(@"HKEY_LOCAL_MACHINE\SOFTWARE\Valve\Steam", "InstallPath", null) as string;
@@ -108,7 +117,7 @@ public static class SteamScanner
 
     private static string Normalize(string p)
     {
-        try { return Path.GetFullPath(p).TrimEnd('\\'); } catch { return p; }
+        try { return Path.GetFullPath(p).TrimEnd(Path.DirectorySeparatorChar); } catch { return p; }
     }
 }
 
