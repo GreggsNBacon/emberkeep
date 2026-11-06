@@ -61,6 +61,44 @@ public sealed class ActivityLog
 }
 
 /// <summary>
+/// Watches the PC's public IP. When it changes, friends outside the home need the new address, so it goes in the
+/// activity log (and from there to notifications and the Discord updates channel). Checked every 5 minutes.
+/// </summary>
+public sealed class PublicAddressWatcher
+{
+    private readonly ServerManager _mgr;
+    private int _started;
+    public PublicAddressWatcher(ServerManager mgr) { _mgr = mgr; }
+
+    public void Start()
+    {
+        if (Interlocked.Exchange(ref _started, 1) == 1) return;
+        var every = TimeSpan.FromSeconds(int.TryParse(AppEnv.Get("ADDRESS_CHECK_SECONDS"), out var s) && s > 0 ? s : 300);
+        _ = Task.Run(async () =>
+        {
+            await Task.Delay(TimeSpan.FromSeconds(Math.Min(30, every.TotalSeconds)));
+            while (true)
+            {
+                try { await CheckAsync(); } catch { }
+                await Task.Delay(every);
+            }
+        });
+    }
+
+    public async Task CheckAsync()
+    {
+        var ip = await NetworkInfo.PublicIpAsync(fresh: true);
+        if (ip == null) return; // offline: try again later
+        var old = _mgr.Settings.LastPublicIp;
+        if (old == ip) return;
+        _mgr.Settings.LastPublicIp = ip;
+        _mgr.Save();
+        if (old.Length > 0)
+            _mgr.Activity.Add("network", $"The public IP changed from {old} to {ip}. Friends outside your home need the new address.", null, null, "warn");
+    }
+}
+
+/// <summary>
 /// Tells you about activity you care about: Windows notifications from the tray icon, and/or a Discord channel webhook.
 /// Which kinds are sent is set in App settings → Notifications.
 /// </summary>
@@ -84,7 +122,8 @@ public sealed class Notifier
         var n = _mgr.Settings.Notifications;
         return e.Kind switch
         {
-            "crash" => n.Crashes,
+            "crash" or "crashloop" => n.Crashes,
+            "network" => true,
             "start" or "stop" => n.StartStop,
             "backup" or "restore" => n.Backups || e.Level == "bad",
             "install" or "update" => n.Updates,

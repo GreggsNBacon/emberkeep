@@ -51,13 +51,14 @@ public static class NetworkInfo
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromSeconds(5) };
 
     /// <summary>Asks ipify.org for this network's public IP. Cached for 10 minutes; only called when the user asks for it.</summary>
-    public static async Task<string?> PublicIpAsync()
+    /// <param name="fresh">Ask again now instead of using the answer from the last 10 minutes.</param>
+    public static async Task<string?> PublicIpAsync(bool fresh = false)
     {
         await PublicLock.WaitAsync();
         try
         {
-            if (_publicCache.Ip != null && DateTime.UtcNow - _publicCache.At < TimeSpan.FromMinutes(10)) return _publicCache.Ip;
-            var text = (await Http.GetStringAsync("https://api.ipify.org")).Trim();
+            if (!fresh && _publicCache.Ip != null && DateTime.UtcNow - _publicCache.At < TimeSpan.FromMinutes(10)) return _publicCache.Ip;
+            var text = (await Http.GetStringAsync(AppEnv.Get("PUBLIC_IP_URL") is { Length: > 0 } u ? u : "https://api.ipify.org")).Trim();
             if (!IPAddress.TryParse(text, out _)) return null;
             _publicCache = (text, DateTime.UtcNow);
             return text;

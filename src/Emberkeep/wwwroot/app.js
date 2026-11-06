@@ -2525,7 +2525,9 @@ async function discordDialog() {
   let d;
   try { d = await api('GET', '/api/discord'); } catch (e) { toast(e.message, 'bad'); return; }
   const body = h('div', { class: 'field-stack' });
-  let channels = null, pollTimer = null, closed = false;
+  let channels = null, channelsReq = null, pollTimer = null, closed = false;
+  // The bot's channels and roles, fetched once for the board and updates pickers.
+  const getChannels = () => channelsReq ??= api('GET', '/api/discord/channels').then(c => (channels = c)).catch(e => { channelsReq = null; throw e; });
   const m = openModal({ title: 'Discord bot', body, onClose: () => { closed = true; clearTimeout(pollTimer); } });
   m.modal.classList.add('wide');
 
@@ -2572,15 +2574,20 @@ async function discordDialog() {
       h('h2', {}, 'Bot'),
       h('div', { class: 'set-rows' },
         h('div', { class: 'set-row' }, h('label', {}, 'Status'),
-          h('div', {}, h('div', { class: 'inline' }, discordDot(d), h('span', {}, discordSummary(d))),
-            s.state === 'error' ? h('div', { class: 'help' }, 'Get a new token from ', portalLink(), ' (Reset Token) and paste it below.') : null)),
+          h('div', {}, h('div', { class: 'inline' }, discordDot(d), h('span', {}, discordSummary(d)),
+            d.enabled && s.state === 'connecting' ? h('button', { class: 'btn btn-small', type: 'button', onclick: () => apply('POST', '/api/discord/retry').then(poll) }, 'Retry now') : null),
+            s.state === 'error' ? h('div', { class: 'help' }, 'Get a new token from ', portalLink(), ' (Reset Token) and paste it below.') : null,
+            (d.history || []).length ? h('details', { class: 'conn-history' },
+              h('summary', {}, 'Connection history'),
+              h('ul', {}, ...d.history.map(l => h('li', { class: l.problem ? 'bad-text' : '' },
+                h('span', { class: 'dim' }, new Date(l.time).toLocaleString([], { day: 'numeric', month: 'short', hour: '2-digit', minute: '2-digit', second: '2-digit' })), ' ', l.text)))) : null)),
         h('div', { class: 'set-row' }, h('label', {}, 'Running'),
           h('div', { class: 'inline' }, h('span', { class: 'toggle' }, enabled, h('span')), h('span', { class: 'dim' }, d.enabled ? 'The bot is online while Emberkeep runs.' : 'Off. The bot shows as offline in Discord.'))),
         h('div', { class: 'set-row' }, h('label', {}, 'Discord servers'),
           h('div', {},
             h('div', { class: 'inline' },
               d.inviteUrl ? h('a', { class: 'btn btn-small btn-primary', href: d.inviteUrl, target: '_blank', rel: 'noopener' }, 'Add the bot to a Discord server') : null,
-              h('button', { class: 'btn btn-small', type: 'button', onclick: async () => { try { d = await api('GET', '/api/discord'); channels = null; draw(); } catch { } } }, 'Refresh')),
+              h('button', { class: 'btn btn-small', type: 'button', onclick: async () => { try { d = await api('GET', '/api/discord'); channels = null; channelsReq = null; draw(); } catch { } } }, 'Refresh')),
             h('div', { class: 'help' }, s.state === 'online' && s.guilds === 0
               ? 'The bot isn\'t in any Discord server yet. Use the button, pick your server and click Authorise. You need the Manage Server permission there.'
               : 'Opens Discord in your browser. Pick a server and click Authorise.'))),
@@ -2604,7 +2611,7 @@ async function discordDialog() {
       }
     };
     if (channels) fill();
-    else if (d.status.state === 'online') api('GET', '/api/discord/channels').then(c => { channels = c; fill(); }).catch(e => sel.replaceChildren(h('option', { value: '' }, e.message)));
+    else if (d.status.state === 'online') getChannels().then(fill).catch(e => sel.replaceChildren(h('option', { value: '' }, e.message)));
     else sel.replaceChildren(h('option', { value: '' }, 'Waiting for the bot to come online…'));
     post.onclick = async () => {
       const opt = sel.selectedOptions[0];
@@ -2615,7 +2622,7 @@ async function discordDialog() {
     };
     return h('div', { class: 'set-group' },
       h('h2', {}, 'Status board'),
-      h('p', {}, 'A message that Emberkeep keeps up to date in a channel: each server\'s status and address, with buttons that send someone the address to copy.'),
+      h('p', {}, 'A message that Emberkeep keeps up to date in a channel: a card for each server with its status and address.'),
       d.status.boardError ? h('div', { class: 'notice bad', style: { margin: '0 0 12px' } }, d.status.boardError) : null,
       h('div', { class: 'set-rows' },
         d.board.posted ? h('div', { class: 'set-row' }, h('label', {}, 'Posted in'),
@@ -2624,6 +2631,62 @@ async function discordDialog() {
         h('div', { class: 'set-row' }, h('label', {}, d.board.posted ? 'Move to' : 'Channel'),
           h('div', {}, h('div', { class: 'inline' }, sel, post),
             h('div', { class: 'help' }, 'The bot needs View Channel, Send Messages and Embed Links there. Tip: a read-only #servers channel works well.')))));
+  };
+
+  // Updates channel: news posts (crashes, address changes, game updates, restarts), optionally pinging a role.
+  const updatesGroup = () => {
+    const u = { ...d.updates };
+    const chanSel = h('select', { class: 'input select' });
+    const roleSel = h('select', { class: 'input select' });
+    const fill = () => {
+      chanSel.replaceChildren(h('option', { value: '' }, 'Off: don\'t post updates'),
+        ...channels.map(g => h('optgroup', { label: g.name }, g.channels.map(c => h('option', { value: c.id, 'data-name': c.name, 'data-guild': g.id, ...(c.id === u.channelId ? { selected: true } : {}) }, `#${c.name}`)))));
+      fillRoles();
+    };
+    const fillRoles = () => {
+      const g = channels?.find(x => x.channels.some(c => c.id === chanSel.value));
+      roleSel.replaceChildren(h('option', { value: '' }, 'Nobody (no notification)'),
+        ...(g?.roles || []).map(r => h('option', { value: r.id, 'data-name': r.name, ...(r.id === u.pingRoleId ? { selected: true } : {}) }, `@${r.name}${r.mentionable ? '' : ' (not mentionable)'}`)));
+      roleSel.disabled = !chanSel.value;
+    };
+    if (channels) fill();
+    else if (d.status.state === 'online') getChannels().then(fill).catch(e => chanSel.replaceChildren(h('option', { value: u.channelId }, e.message)));
+    else chanSel.replaceChildren(h('option', { value: u.channelId }, u.channelName ? `#${u.channelName}` : 'Waiting for the bot to come online…'));
+    chanSel.onchange = fillRoles;
+    const kind = (key, label, help) => {
+      const cb = h('input', { type: 'checkbox', ...(u[key] ? { checked: true } : {}) });
+      cb.onchange = () => { u[key] = cb.checked; };
+      return h('label', { class: 'check' }, cb, ' ', label, help ? h('span', { class: 'dim small' }, ` (${help})`) : null);
+    };
+    const save = h('button', { class: 'btn btn-primary btn-small', type: 'button' }, 'Save');
+    const collect = () => ({ ...u,
+      channelId: chanSel.value, channelName: chanSel.selectedOptions[0]?.dataset.name || '',
+      pingRoleId: chanSel.value ? roleSel.value : '', pingRoleName: roleSel.selectedOptions[0]?.dataset.name || '' });
+    save.onclick = () => apply('PUT', '/api/discord', { updates: collect() }, chanSel.value ? `Updates go to #${chanSel.selectedOptions[0].dataset.name}.` : 'Updates are off.');
+    const test = h('button', { class: 'btn btn-small', type: 'button', onclick: async () => {
+      if (!(await apply('PUT', '/api/discord', { updates: collect() }))) return;
+      apply('POST', '/api/discord/updates/test', undefined, 'Posted a test message.');
+    } }, 'Send a test');
+    const role = channels?.flatMap(g => g.roles || []).find(r => r.id === u.pingRoleId);
+    return h('div', { class: 'set-group' },
+      h('h2', {}, 'Updates channel'),
+      h('p', {}, 'The bot posts news here, so friends know what\'s going on: when a server crashes and when it\'s back, when your address changes (with the new one), when a server updates, and before scheduled restarts.'),
+      d.status.updatesError ? h('div', { class: 'notice bad', style: { margin: '0 0 12px' } }, d.status.updatesError) : null,
+      h('div', { class: 'set-rows' },
+        h('div', { class: 'set-row' }, h('label', {}, 'Channel'), h('div', {}, chanSel,
+          h('div', { class: 'help' }, 'Can be the same channel as the status board. The bot needs View Channel, Send Messages and Embed Links there.'))),
+        h('div', { class: 'set-row' }, h('label', {}, 'Post about'),
+          h('div', { class: 'check-list' },
+            kind('crashes', 'Crashes', 'and when the server is back'),
+            kind('addressChanges', 'Address changes', d.addressHost ? 'off while you share a host name' : 'checked every 5 minutes'),
+            kind('gameUpdates', 'Server updates', 'installed with SteamCMD'),
+            kind('restarts', 'Scheduled restarts', 'a heads-up before, and when it\'s back'),
+            kind('startStop', 'Servers starting and stopping'))),
+        h('div', { class: 'set-row' }, h('label', {}, 'Ping', h('span', { class: 'label-sub' }, 'For crashes and address changes')),
+          h('div', {}, roleSel, h('div', { class: 'help' }, role && !role.mentionable
+            ? 'That role isn\'t mentionable, so Discord only pings it if the bot has the Mention @everyone permission. Turn on "Allow anyone to @mention this role" in the role\'s settings instead.'
+            : 'People with this role get a notification. Tip: make an opt-in role such as @Server news.'))),
+        h('div', { class: 'set-row' }, h('label', {}, ''), h('div', { class: 'inline' }, save, test))));
   };
 
   const shareGroup = () => {
@@ -2664,7 +2727,7 @@ async function discordDialog() {
       h('div', { class: 'set-row' }, h('label', {}, h('code', {}, '/ip')), h('span', {}, 'The address for one server, by itself so it\'s easy to copy (also on phones).'))));
 
   function draw() {
-    body.replaceChildren(...(d.hasToken ? [statusGroup(), boardGroup(), shareGroup(), commandsGroup()] : [setupGroup()]));
+    body.replaceChildren(...(d.hasToken ? [statusGroup(), boardGroup(), updatesGroup(), shareGroup(), commandsGroup()] : [setupGroup()]));
     poll();
   }
   draw();

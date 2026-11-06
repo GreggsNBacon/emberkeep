@@ -95,12 +95,13 @@ public sealed class ServerManager : IDisposable
                 Activity.Add("start", rt.Adopted ? "Found running." : "Started.", rt.Config, rt.Actor, "good");
             if (now == ServerState.Running) rt.Actor = null; // a stop is credited in Exited, below
         };
+        rt.GaveUp += () => Activity.Add("crashloop", "Kept crashing (more than 5 times in 10 minutes), so auto-restart gave up.", rt.Config, null, "bad");
         rt.Exited += (requested, code) =>
         {
             try { ServerExited?.Invoke(rt, requested); } catch { }
             if (requested) Activity.Add("stop", "Stopped.", rt.Config, rt.Actor);
-            if (rt.State == ServerState.Stopped) rt.Actor = null;
             else Activity.Add("crash", code is int c && c != 0 ? $"Stopped unexpectedly (exit code {c})." : "Stopped unexpectedly.", rt.Config, null, "bad");
+            rt.Actor = null;
         };
         _runtimes[s.Id] = rt;
         return rt;

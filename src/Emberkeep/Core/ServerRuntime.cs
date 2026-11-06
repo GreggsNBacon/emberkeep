@@ -44,6 +44,9 @@ public sealed class ServerRuntime
     /// <summary>The process ended: (asked to stop?, exit code). False means it crashed or closed by itself.</summary>
     public event Action<bool, int?>? Exited;
 
+    /// <summary>Auto-restart gave up because the server kept crashing.</summary>
+    public event Action? GaveUp;
+
     private readonly object _histLock = new();
     private readonly List<(DateTime T, double Cpu, long Mem)> _history = new();
 
@@ -251,6 +254,7 @@ public sealed class ServerRuntime
             if (_crashTimes.Count > 5)
             {
                 Logs.Add("error", "Auto-restart gave up: the server crashed more than 5 times in 10 minutes.");
+                try { GaveUp?.Invoke(); } catch { }
                 return;
             }
             Logs.Add("system", "Auto-restart is on. Restarting in 10 seconds…");

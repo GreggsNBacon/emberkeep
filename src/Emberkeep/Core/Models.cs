@@ -137,6 +137,8 @@ public sealed class AppSettings
     public string InstallRoot { get; set; } = "";
     /// <summary>Folder backups go into (one subfolder per server). Empty: %LOCALAPPDATA%EmberkeepBackups.</summary>
     public string BackupRoot { get; set; } = "";
+    /// <summary>The public IP last seen, to notice when it changes.</summary>
+    public string LastPublicIp { get; set; } = "";
     public NotificationSettings Notifications { get; set; } = new();
 }
 
