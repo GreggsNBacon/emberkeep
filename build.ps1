@@ -1,5 +1,5 @@
 # Builds Emberkeep.exe, bundles Watchfire, and builds the installer.
-#   .\build.ps1            -> publish\Emberkeep.exe, publish\watchfire\Watchfire.exe and dist\Emberkeep-Setup.msi
+#   .\build.ps1            -> publish\Emberkeep.exe, publish\watchfire\Watchfire.exe and dist\Emberkeep-<version>-Setup.msi
 #
 # Watchfire: built from ..\Watchfire with Node (node on PATH, or $env:EMBERKEEP_NODE pointing at node.exe).
 # Without Node, the existing ..\Watchfire\dist\Watchfire.exe is bundled as-is.
@@ -53,7 +53,10 @@ Write-Host 'Building the installer...'
 # A fresh ProductCode per installer, and a full rebuild: WiX's incremental build would otherwise
 # reuse the previous output and its ProductCode, turning upgrades into failed "repairs".
 $productCode = [guid]::NewGuid().ToString('B').ToUpperInvariant()
-dotnet build installer\Emberkeep.Installer.wixproj -c Release -t:Rebuild -o dist "-p:ProductCode=$productCode" "-p:WatchfireExe=$(Join-Path $phOut 'Watchfire.exe')"
+# Only this build's installer in dist, named with its version (Emberkeep-0.3.32-Setup.msi), so downloads of different
+# versions don't end up as "Emberkeep-Setup (1).msi".
+Remove-Item dist\*.msi, dist\*.wixpdb -ErrorAction SilentlyContinue
+dotnet build installer\Emberkeep.Installer.wixproj -c Release -t:Rebuild -o dist "-p:ProductCode=$productCode" "-p:WatchfireExe=$(Join-Path $phOut 'Watchfire.exe')" "-p:OutputName=Emberkeep-$version-Setup"
 if ($LASTEXITCODE) { throw 'Building the installer failed.' }
 
 Get-ChildItem dist\*.msi | ForEach-Object { Write-Host "Installer: $($_.FullName) ($([math]::Round($_.Length / 1MB, 1)) MB), version $fileVersion" }
