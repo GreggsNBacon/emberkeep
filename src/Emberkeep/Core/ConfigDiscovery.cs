@@ -118,7 +118,7 @@ public static class ConfigDiscovery
                 var rel = Path.GetRelativePath(installDir, full);
                 if (!rel.StartsWith("..") && !Path.IsPathRooted(rel)) display = rel;
             }
-            display = display.Replace(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), "%USERPROFILE%", StringComparison.OrdinalIgnoreCase);
+            display = display.Replace(Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), Platform.IsWindows ? "%USERPROFILE%" : "~", StringComparison.OrdinalIgnoreCase);
             string? head = fi.Extension.Equals(".cfg", StringComparison.OrdinalIgnoreCase) ? ReadHead(full) : null;
             found[full] = new ConfigFileInfo(full, display, fi.Name, DetectFormat(full, head), known, fi.Length, fi.LastWriteTimeUtc);
         }
@@ -140,7 +140,7 @@ public static class ConfigDiscovery
     /// <summary>Expands %ENV% vars and '*' wildcards (one per path segment) into existing files.</summary>
     public static IEnumerable<string> ExpandPattern(string pattern, string baseDir)
     {
-        var expanded = Environment.ExpandEnvironmentVariables(pattern);
+        var expanded = GameCatalog.OsPath(pattern);
         if (!Path.IsPathRooted(expanded))
         {
             if (string.IsNullOrEmpty(baseDir)) yield break;
@@ -152,8 +152,8 @@ public static class ConfigDiscovery
             yield break;
         }
 
-        var segments = expanded.Split('\\');
-        var current = new List<string> { segments[0] + "\\" };
+        var segments = expanded.Split(Path.DirectorySeparatorChar);
+        var current = new List<string> { segments[0] + Path.DirectorySeparatorChar };
         for (int i = 1; i < segments.Length; i++)
         {
             bool last = i == segments.Length - 1;

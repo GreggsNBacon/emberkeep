@@ -79,7 +79,9 @@ public sealed class UpdateChecker
                 foreach (var a in assets.EnumerateArray())
                 {
                     var name = a.GetProperty("name").GetString() ?? "";
-                    if (!name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)) continue;
+                    // Windows: the MSI. Linux: the linux-x64 tarball.
+                    if (Platform.IsWindows ? !name.EndsWith(".msi", StringComparison.OrdinalIgnoreCase)
+                        : !name.EndsWith("-linux-x64.tar.gz", StringComparison.OrdinalIgnoreCase)) continue;
                     url = a.GetProperty("browser_download_url").GetString();
                     size = a.TryGetProperty("size", out var sz) ? sz.GetInt64() : 0;
                     break;
@@ -109,7 +111,7 @@ public sealed class UpdateChecker
         {
             var dir = Path.Combine(Path.GetTempPath(), "Emberkeep-update");
             Directory.CreateDirectory(dir);
-            var path = Path.Combine(dir, $"Emberkeep-{u.Version}-Setup.msi");
+            var path = Path.Combine(dir, Platform.IsWindows ? $"Emberkeep-{u.Version}-Setup.msi" : $"Emberkeep-{u.Version}-linux-x64.tar.gz");
             var part = path + ".part";
             try
             {
@@ -129,10 +131,47 @@ public sealed class UpdateChecker
                 try { File.Delete(part); } catch { } // don't leave a broken download behind
                 throw;
             }
-            Process.Start(new ProcessStartInfo("msiexec.exe", $"/i \"{path}\"") { UseShellExecute = true });
+            if (Platform.IsWindows) Process.Start(new ProcessStartInfo("msiexec.exe", $"/i \"{path}\"") { UseShellExecute = true });
+            else await ReplaceBinaryAsync(path);
         }
         finally { Installing = false; }
     }
+
+    /// <summary>
+    /// Linux: takes the new emberkeep program out of the release tarball and puts it in place of this one (a running
+    /// program can be replaced on Linux). The caller then stops the servers and exits; systemd starts the new version.
+    /// </summary>
+    private static async Task ReplaceBinaryAsync(string tarball)
+    {
+        var self = Environment.ProcessPath ?? throw new InvalidOperationException("Can't tell where Emberkeep is installed.");
+        var next = self + ".new";
+        await using (var fs = File.OpenRead(tarball))
+        await using (var gz = new System.IO.Compression.GZipStream(fs, System.IO.Compression.CompressionMode.Decompress))
+        {
+            var reader = new System.Formats.Tar.TarReader(gz);
+            System.Formats.Tar.TarEntry? e;
+            bool found = false;
+            while ((e = await reader.GetNextEntryAsync()) != null)
+            {
+                if (e.EntryType is not (System.Formats.Tar.TarEntryType.RegularFile or System.Formats.Tar.TarEntryType.V7RegularFile)) continue;
+                if (!Path.GetFileName(e.Name.TrimEnd('/')).Equals("emberkeep", StringComparison.Ordinal)) continue;
+                await e.ExtractToFileAsync(next, overwrite: true);
+                found = true;
+                break;
+            }
+            if (!found) throw new InvalidOperationException("The download doesn't contain the emberkeep program.");
+        }
+        File.SetUnixFileMode(next, File.GetUnixFileMode(self));
+        try { File.Move(next, self, overwrite: true); }
+        catch (UnauthorizedAccessException)
+        {
+            File.Delete(next);
+            throw new InvalidOperationException($"Emberkeep can't replace {self}: the user it runs as needs to be able to write there. Install the update with install.sh instead.");
+        }
+    }
+
+    /// <summary>Linux: whether Emberkeep runs under systemd, which starts it again after an update.</summary>
+    public static bool UnderSystemd => !Platform.IsWindows && Environment.GetEnvironmentVariable("INVOCATION_ID") is { Length: > 0 };
 
     private static Version Trim(Version v) => new(v.Major, Math.Max(v.Minor, 0), Math.Max(v.Build, 0));
 }

@@ -22,7 +22,7 @@ public static class JoinInfo
     {
         if (s.JoinPort is int manual and > 0) return new(manual, "set in Settings", null, null);
         string dir = s.InstallDir, args = s.Arguments ?? "";
-        string P(string rel) => Path.Combine(dir, rel);
+        string P(string rel) => Path.Combine(dir, GameCatalog.OsPath(rel));
 
         switch (s.GameId)
         {
@@ -84,7 +84,7 @@ public static class JoinInfo
     public static List<DetectedPort> Ports(ServerInstance s)
     {
         string dir = s.InstallDir, args = s.Arguments ?? "";
-        string P(string rel) => Path.Combine(dir, rel);
+        string P(string rel) => Path.Combine(dir, GameCatalog.OsPath(rel));
         var list = new List<DetectedPort>();
         void Add(string role, string proto, int def, params JoinDetails?[] readers)
         {

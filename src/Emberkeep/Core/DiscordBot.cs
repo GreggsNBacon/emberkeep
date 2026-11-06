@@ -122,7 +122,7 @@ public sealed class DiscordBot : IDisposable
         // Reconnect straight away when the network comes back or the PC wakes, instead of waiting for the next retry.
         NetworkChange.NetworkAvailabilityChanged += (_, e) => { if (e.IsAvailable) NetworkBack("The network came back."); };
         NetworkChange.NetworkAddressChanged += (_, _) => NetworkBack("The network changed.");
-        try { Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) NetworkBack("The PC woke up."); }; } catch { }
+        if (OperatingSystem.IsWindows()) try { Microsoft.Win32.SystemEvents.PowerModeChanged += (_, e) => { if (e.Mode == Microsoft.Win32.PowerModes.Resume) NetworkBack("The PC woke up."); }; } catch { }
     }
 
     /// <summary>The last connection events, newest first, so a flaky connection can be understood.</summary>
@@ -239,13 +239,9 @@ public sealed class DiscordBot : IDisposable
 
     private void SetState(string state, string message) { _state = state; _message = message; }
 
-    private static string Protect(string s) => Convert.ToBase64String(ProtectedData.Protect(Encoding.UTF8.GetBytes(s), Entropy, DataProtectionScope.CurrentUser));
+    private static string Protect(string s) => Platform.Protect(s, Entropy);
 
-    private static string? Unprotect(string s)
-    {
-        try { return Encoding.UTF8.GetString(ProtectedData.Unprotect(Convert.FromBase64String(s), Entropy, DataProtectionScope.CurrentUser)); }
-        catch { return null; }
-    }
+    private static string? Unprotect(string s) => Platform.Unprotect(s, Entropy);
 
     // ---------------- gateway ----------------
 

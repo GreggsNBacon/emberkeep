@@ -39,6 +39,7 @@ public sealed class PcRestart
     /// <summary>Starts watching the clock for the daily restart (once per run).</summary>
     public void Start()
     {
+        if (!Platform.IsWindows) return; // Linux: a service can't restart the machine (and shouldn't need to)
         if (Interlocked.Exchange(ref _started, 1) == 1) return;
         // A restart time that has already passed today doesn't fire just because Emberkeep (re)started after it.
         if (DailyTime() is { } t && DateTime.Now.TimeOfDay > t.ToTimeSpan()) _lastDailyDay = DateOnly.FromDateTime(DateTime.Now);
@@ -81,6 +82,7 @@ public sealed class PcRestart
 
     private PendingRestart Schedule(TimeSpan delay, string reason)
     {
+        if (!Platform.IsWindows) throw new InvalidOperationException("Restarting the machine is only available on Windows.");
         lock (_lock)
         {
             if (Pending != null) return Pending;

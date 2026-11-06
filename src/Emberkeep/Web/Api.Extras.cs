@@ -85,6 +85,7 @@ public static partial class Api
             var rt = mgr.Get(id);
             if (rt == null) return Results.NotFound();
             if (!WebHost.Who(ctx).IsLocal) return Error("This only works on the PC that runs Emberkeep.");
+            if (!Platform.IsWindows) return Error("This opens File Explorer, which is only on Windows.");
             var dir = host.Backups.DirFor(rt.Config);
             Directory.CreateDirectory(dir);
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true });

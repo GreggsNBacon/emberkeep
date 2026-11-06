@@ -22,6 +22,9 @@ namespace Emberkeep.Core;
 public static class SteamCmd
 {
     private const string ZipUrl = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd.zip";
+    private const string TarUrl = "https://steamcdn-a.akamaihd.net/client/installer/steamcmd_linux.tar.gz";
+    /// <summary>The program in Emberkeep's own copy: steamcmd.exe on Windows, the steamcmd.sh launcher on Linux.</summary>
+    private static string OwnExe => Platform.IsWindows ? "steamcmd.exe" : "steamcmd.sh";
     private static readonly SemaphoreSlim SetupGate = new(1, 1);
     private static readonly HttpClient Http = new() { Timeout = TimeSpan.FromMinutes(5) };
 
@@ -34,7 +37,7 @@ public static class SteamCmd
     public static string ExePath(AppSettings s) =>
         AppEnv.Get("STEAMCMD") is { Length: > 0 } env ? env
         : !string.IsNullOrWhiteSpace(s.SteamCmdPath) ? s.SteamCmdPath
-        : Path.Combine(OwnDir, "steamcmd.exe");
+        : Path.Combine(OwnDir, OwnExe);
 
     public static bool IsInstalled(AppSettings s) => File.Exists(ExePath(s));
 
@@ -47,10 +50,22 @@ public static class SteamCmd
             var exe = ExePath(s);
             if (!File.Exists(exe))
             {
-                if (!exe.Equals(Path.Combine(OwnDir, "steamcmd.exe"), StringComparison.OrdinalIgnoreCase))
+                if (!exe.Equals(Path.Combine(OwnDir, OwnExe), StringComparison.OrdinalIgnoreCase))
                     throw new InvalidOperationException($"SteamCMD isn't at {exe}. Fix the path in App settings, or clear it to let Emberkeep set SteamCMD up itself.");
                 status("Downloading SteamCMD from Valve…");
                 Directory.CreateDirectory(OwnDir);
+                if (!Platform.IsWindows)
+                {
+                    // Linux: Valve's tarball (steamcmd.sh plus linux32/), over HTTPS from Valve's CDN. Execute bits come with it.
+                    using var res = await Http.GetAsync(TarUrl, HttpCompletionOption.ResponseHeadersRead, ct);
+                    res.EnsureSuccessStatusCode();
+                    await using var src = await res.Content.ReadAsStreamAsync(ct);
+                    await using var gz = new GZipStream(src, CompressionMode.Decompress);
+                    await System.Formats.Tar.TarFile.ExtractToDirectoryAsync(gz, OwnDir, overwriteFiles: true, ct);
+                    Platform.MakeExecutable(exe);
+                    Platform.MakeExecutable(Path.Combine(OwnDir, "linux32", "steamcmd"));
+                    return;
+                }
                 var zip = Path.Combine(OwnDir, "steamcmd.zip");
                 using (var res = await Http.GetAsync(ZipUrl, HttpCompletionOption.ResponseHeadersRead, ct))
                 {
@@ -62,7 +77,7 @@ public static class SteamCmd
                 ZipFile.ExtractToDirectory(zip, OwnDir, overwriteFiles: true);
                 File.Delete(zip);
             }
-            if (!SignedByValve(exe))
+            if (Platform.IsWindows && !SignedByValve(exe))
             {
                 throw new InvalidOperationException($"{exe} isn't signed by Valve, so Emberkeep won't run it. Delete it and try again.");
             }
@@ -127,6 +142,20 @@ public static class SteamCmd
         }
     }
 
+    /// <summary>
+    /// Where SteamCMD writes its console log (with live progress lines). Windows: next to steamcmd.exe. Linux: it depends
+    /// on the version and how it was installed, so the newest of the usual places.
+    /// </summary>
+    public static string ConsoleLogPath(AppSettings s)
+    {
+        var own = Path.Combine(Path.GetDirectoryName(ExePath(s))!, "logs", "console_log.txt");
+        if (Platform.IsWindows) return own;
+        var home = Environment.GetFolderPath(Environment.SpecialFolder.UserProfile);
+        return new[] { own, Path.Combine(home, "Steam", "logs", "console_log.txt"), Path.Combine(home, ".steam", "steam", "logs", "console_log.txt"),
+                Path.Combine(home, ".local", "share", "Steam", "logs", "console_log.txt") }
+            .Where(File.Exists).OrderByDescending(File.GetLastWriteTimeUtc).FirstOrDefault() ?? own;
+    }
+
     private static readonly Regex Progress = new(@"Update state \(0x[0-9a-f]+\) (\w[\w ]*?), progress: ([\d.]+) \((\d+) / (\d+)\)", RegexOptions.IgnoreCase);
 
     /// <summary>Reads a SteamCMD progress line: what it's doing, percent, bytes done and total.</summary>
@@ -170,6 +199,9 @@ public static class SteamCmd
     /// <summary>A short reason from SteamCMD's output when it failed.</summary>
     public static string FailureReason(string output, int exitCode)
     {
+        // Linux: SteamCMD is a 32-bit program; without 32-bit libraries it can't even start.
+        if (!Platform.IsWindows && (exitCode == 127 || output.Contains("linux32/steamcmd: No such file", StringComparison.Ordinal) || output.Contains("libstdc++.so.6", StringComparison.Ordinal)))
+            return "SteamCMD needs 32-bit libraries. Install them, for example: sudo apt install lib32gcc-s1 (Debian/Ubuntu) or sudo dnf install glibc.i686 libstdc++.i686 (Fedora).";
         var err = output.Split('\n').Select(l => l.Trim()).LastOrDefault(l => l.StartsWith("ERROR!", StringComparison.OrdinalIgnoreCase)
             || l.Contains("Failed to install app", StringComparison.OrdinalIgnoreCase));
         if (err != null)

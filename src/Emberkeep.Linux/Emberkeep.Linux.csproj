@@ -1,0 +1,45 @@
+<Project Sdk="Microsoft.NET.Sdk.Web">
+
+  <!-- Emberkeep for Linux: the same server manager and web interface as the Windows app, run as a service
+       (no desktop window). Compiles the shared Core and Web code from ../Emberkeep. -->
+  <PropertyGroup>
+    <OutputType>Exe</OutputType>
+    <TargetFramework>net10.0</TargetFramework>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <RootNamespace>Emberkeep</RootNamespace>
+    <AssemblyName>emberkeep</AssemblyName>
+    <Version>0.2.0</Version>
+    <Product>Emberkeep</Product>
+    <RuntimeIdentifier>linux-x64</RuntimeIdentifier>
+    <InvariantGlobalization>true</InvariantGlobalization>
+    <SatelliteResourceLanguages>en</SatelliteResourceLanguages>
+    <StaticWebAssetsEnabled>false</StaticWebAssetsEnabled>
+    <DefineConstants>$(DefineConstants);LINUX</DefineConstants>
+    <NoWarn>$(NoWarn);MSB3277;CA1416</NoWarn>
+  </PropertyGroup>
+
+  <PropertyGroup Condition="'$(Configuration)' == 'Release'">
+    <SelfContained>true</SelfContained>
+    <PublishSingleFile>true</PublishSingleFile>
+    <IncludeNativeLibrariesForSelfExtract>true</IncludeNativeLibrariesForSelfExtract>
+    <EnableCompressionInSingleFile>true</EnableCompressionInSingleFile>
+    <DebugType>none</DebugType>
+    <PublishDocumentationFiles>false</PublishDocumentationFiles>
+    <IsTransformWebConfigDisabled>true</IsTransformWebConfigDisabled>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <!-- Windows-only APIs the shared code references behind OperatingSystem.IsWindows() checks. -->
+    <PackageReference Include="System.Security.Cryptography.ProtectedData" Version="10.0.0" />
+    <PackageReference Include="Microsoft.Win32.SystemEvents" Version="10.0.0" />
+  </ItemGroup>
+
+  <ItemGroup>
+    <Compile Include="..\Emberkeep\Core\**\*.cs" LinkBase="Core" />
+    <Compile Include="..\Emberkeep\Web\**\*.cs" LinkBase="Web" />
+    <Content Remove="**" />
+    <EmbeddedResource Include="..\Emberkeep\wwwroot\**" LogicalName="wwwroot/%(RecursiveDir)%(Filename)%(Extension)" />
+  </ItemGroup>
+
+</Project>

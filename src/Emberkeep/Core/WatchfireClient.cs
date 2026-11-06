@@ -41,6 +41,7 @@ public static class WatchfireClient
     /// <summary>Where Watchfire.exe is, if anywhere: next to Emberkeep's install, its own install, or its "start with Windows" entry.</summary>
     public static string? FindExe()
     {
+        if (!Platform.IsWindows) return null; // Watchfire is a Windows app; on Linux Emberkeep uses its own UPnP
         var candidates = new List<string?>
         {
             AppEnv.Get("WATCHFIRE_EXE"),

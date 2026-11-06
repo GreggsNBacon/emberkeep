@@ -29,7 +29,7 @@ public static class ConfigFiles
     public static string? Write(ServerInstance s, string path, string content)
     {
         Encoding enc = new UTF8Encoding(false);
-        string newline = "\r\n";
+        string newline = Platform.IsWindows ? "\r\n" : "\n"; // new files: this system's line endings
         string? backup = null;
         if (File.Exists(path))
         {

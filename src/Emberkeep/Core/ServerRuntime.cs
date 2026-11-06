@@ -83,19 +83,19 @@ public sealed class ServerRuntime
 
     public string ResolveExecutable()
     {
-        var exe = Environment.ExpandEnvironmentVariables(Config.Executable.Trim().Trim('"'));
+        var exe = Platform.Path(Config.Executable.Trim().Trim('"'));
         if (string.IsNullOrEmpty(exe)) return "";
         if (Path.IsPathRooted(exe)) return exe;
         var local = Path.Combine(Config.InstallDir, exe);
         if (File.Exists(local) || exe.Contains('\\') || exe.Contains('/')) return Path.GetFullPath(local);
-        return exe; // bare name such as "java": let Windows search PATH
+        return exe; // bare name such as "java": let the system search PATH
     }
 
     public string ResolveWorkingDirectory()
     {
         var wd = Config.WorkingDirectory?.Trim();
         if (string.IsNullOrEmpty(wd)) return Config.InstallDir;
-        wd = Environment.ExpandEnvironmentVariables(wd);
+        wd = Platform.Path(wd);
         return Path.IsPathRooted(wd) ? wd : Path.GetFullPath(Path.Combine(Config.InstallDir, wd));
     }
 
@@ -123,11 +123,13 @@ public sealed class ServerRuntime
         {
             if (State is ServerState.Running or ServerState.Stopping) return;
             LastError = null;
+            if (Game.WindowsOnly) { Fail($"{Game.Name} has no Linux server, so it can't run here. Run it with Emberkeep on Windows."); return; }
             var exe = ResolveExecutable();
             if (string.IsNullOrEmpty(exe)) { Fail("No executable is set. Choose one in the server's Settings tab."); return; }
             if (Path.IsPathRooted(exe) && !File.Exists(exe)) { Fail($"Executable not found: {exe}"); return; }
             var wd = ResolveWorkingDirectory();
             if (!Directory.Exists(wd)) { Fail($"Working directory not found: {wd}"); return; }
+            Platform.MakeExecutable(exe); // Linux: downloaded server programs and scripts sometimes lack the execute bit
 
             // Settings kept in files and passed encoded on the command line (see ArgBlobs), e.g. Assetto Corsa EVO.
             string args;
