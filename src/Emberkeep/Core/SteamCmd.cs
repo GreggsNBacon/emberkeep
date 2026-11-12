@@ -64,6 +64,10 @@ public static class SteamCmd
                     await System.Formats.Tar.TarFile.ExtractToDirectoryAsync(gz, OwnDir, overwriteFiles: true, ct);
                     Platform.MakeExecutable(exe);
                     Platform.MakeExecutable(Path.Combine(OwnDir, "linux32", "steamcmd"));
+                    // Its first run downloads the rest of SteamCMD. Installing a game in that same run can fail with
+                    // "Missing configuration", so let it finish setting itself up on its own first.
+                    status("Setting up SteamCMD…");
+                    await RunBareAsync(exe, ct);
                     return;
                 }
                 var zip = Path.Combine(OwnDir, "steamcmd.zip");
@@ -84,6 +88,24 @@ public static class SteamCmd
         }
         finally { SetupGate.Release(); }
     }
+
+    /// <summary>Runs SteamCMD with just +quit (its self-update), up to twice, ignoring the result.</summary>
+    private static async Task RunBareAsync(string exe, CancellationToken ct)
+    {
+        for (int i = 0; i < 2; i++)
+        {
+            var psi = new ProcessStartInfo(exe, "+quit") { UseShellExecute = false, CreateNoWindow = true, RedirectStandardOutput = true, RedirectStandardError = true, WorkingDirectory = Path.GetDirectoryName(exe)! };
+            using var p = Process.Start(psi);
+            if (p == null) return;
+            var o = p.StandardOutput.ReadToEndAsync(ct); var e = p.StandardError.ReadToEndAsync(ct);
+            using (ct.Register(() => { try { p.Kill(entireProcessTree: true); } catch { } }))
+                await p.WaitForExitAsync(CancellationToken.None);
+            ct.ThrowIfCancellationRequested();
+            if (p.ExitCode != 7) return; // 7: it updated itself and wants to run again
+        }
+    }
+
+    private static readonly Regex Ansi = new(@"\x1B\[[0-9;?]*[A-Za-z]");
 
     /// <summary>Windows trusts the file's signature, and the signer is Valve.</summary>
     public static bool SignedByValve(string path)
@@ -125,10 +147,10 @@ public static class SteamCmd
                     for (int i = 0; i < n; i++)
                     {
                         char c = buf[i];
-                        if (c == '\r' || c == '\n') { if (cur.Length > 0) { var t = cur.ToString(); cur.Clear(); lock (all) all.AppendLine(t); line(t); } }
+                        if (c == '\r' || c == '\n') { if (cur.Length > 0) { var t = Ansi.Replace(cur.ToString(), ""); cur.Clear(); if (t.Length == 0) continue; lock (all) all.AppendLine(t); line(t); } }
                         else cur.Append(c);
                     }
-                if (cur.Length > 0) { var t = cur.ToString(); lock (all) all.AppendLine(t); line(t); }
+                if (cur.Length > 0) { var t = Ansi.Replace(cur.ToString(), ""); lock (all) all.AppendLine(t); line(t); }
             });
             Pump(p.StandardOutput); Pump(p.StandardError);
             using (ct.Register(() => { try { p.Kill(entireProcessTree: true); } catch { } }))
@@ -138,6 +160,8 @@ public static class SteamCmd
             string output; lock (all) output = all.ToString();
             // 7: SteamCMD restarted after updating itself.
             if (p.ExitCode == 7 && attempt == 0) { line("SteamCMD updated itself. Running it again…"); continue; }
+            // Right after SteamCMD set itself up (mostly on Linux), the first install can fail like this; the next works.
+            if (attempt == 0 && output.Contains("Missing configuration", StringComparison.OrdinalIgnoreCase)) { line("SteamCMD wasn't ready yet. Trying again…"); continue; }
             return (p.ExitCode, output);
         }
     }
