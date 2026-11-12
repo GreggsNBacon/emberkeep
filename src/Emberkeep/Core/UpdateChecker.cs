@@ -106,6 +106,8 @@ public sealed class UpdateChecker
         if (AppEnv.Get("UPDATE_URL") == null && !u.InstallerUrl.StartsWith(TrustedDownloadPrefix, StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("The installer isn't on Emberkeep's GitHub releases, so it won't be downloaded.");
         if (Installing) throw new InvalidOperationException("The update is already downloading.");
+        if (InstalledByPackage)
+            throw new InvalidOperationException($"Emberkeep was installed from a .deb package, so update it the same way: download emberkeep_{u.Version}_amd64.deb from the release page and run: sudo apt install ./emberkeep_{u.Version}_amd64.deb");
         Installing = true;
         try
         {
@@ -169,6 +171,10 @@ public sealed class UpdateChecker
             throw new InvalidOperationException($"Emberkeep can't replace {self}: the user it runs as needs to be able to write there. Install the update with install.sh instead.");
         }
     }
+
+    /// <summary>Linux: installed from the .deb, so dpkg owns the program file and Emberkeep mustn't replace it itself.</summary>
+    public static bool InstalledByPackage => !Platform.IsWindows && File.Exists("/var/lib/dpkg/info/emberkeep.list")
+        && Environment.ProcessPath is { } p && File.ReadAllText("/var/lib/dpkg/info/emberkeep.list").Contains(p, StringComparison.Ordinal);
 
     /// <summary>Linux: whether Emberkeep runs under systemd, which starts it again after an update.</summary>
     public static bool UnderSystemd => !Platform.IsWindows && Environment.GetEnvironmentVariable("INVOCATION_ID") is { Length: > 0 };

@@ -1,0 +1,9 @@
+#!/bin/sh
+# Emberkeep .deb: game servers and worlds are never deleted automatically, not even on purge.
+set -e
+if [ -d /run/systemd/system ]; then systemctl daemon-reload >/dev/null 2>&1 || true; fi
+if [ "$1" = "purge" ] && [ -d /var/lib/emberkeep ]; then
+  echo "Emberkeep's settings, game servers and backups are still in /var/lib/emberkeep."
+  echo "If you don't need them: sudo rm -rf /var/lib/emberkeep && sudo userdel emberkeep"
+fi
+exit 0

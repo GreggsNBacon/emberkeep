@@ -3,7 +3,8 @@
 #   /opt/emberkeep/emberkeep              the program
 #   /var/lib/emberkeep                    home of the "emberkeep" user: settings, game servers, SteamCMD, backups
 #   /etc/systemd/system/emberkeep.service the service (starts with the machine)
-#   /usr/local/bin/emberkeep-link         prints the host's sign-in link
+#   /usr/local/bin/emberkeep              the emberkeep command (emberkeep link, emberkeep open)
+#   /usr/share/applications               an "Emberkeep" menu entry, on machines with a desktop
 # Usage: sudo ./install.sh
 set -eu
 
@@ -23,10 +24,17 @@ HOME_DIR=/var/lib/emberkeep
 
 if ! id "$SVC_USER" >/dev/null 2>&1; then
   NOLOGIN=$(command -v nologin || echo /usr/sbin/nologin)
-  useradd --system --create-home --home-dir "$HOME_DIR" --shell "$NOLOGIN" "$SVC_USER"
+  useradd --system --user-group --create-home --home-dir "$HOME_DIR" --shell "$NOLOGIN" "$SVC_USER"
   echo "Created the $SVC_USER user (home: $HOME_DIR)."
 fi
-install -d -o "$SVC_USER" -g "$SVC_USER" -m 755 "$HOME_DIR" "$PREFIX"
+install -d -o "$SVC_USER" -g "$SVC_USER" -m 755 "$PREFIX"
+# Settings, game servers and the sign-in link: the emberkeep user, plus the people in its group.
+install -d -o "$SVC_USER" -g "$SVC_USER" -m 750 "$HOME_DIR"
+chmod 750 "$HOME_DIR"
+if [ -n "${SUDO_USER:-}" ] && [ "$SUDO_USER" != "root" ] && ! id -nG "$SUDO_USER" | grep -qw "$SVC_USER"; then
+  usermod -aG "$SVC_USER" "$SUDO_USER"
+  echo "Added $SUDO_USER to the $SVC_USER group, so you can open Emberkeep without sudo (from your next login)."
+fi
 
 if systemctl is-active --quiet emberkeep 2>/dev/null; then
   echo "Stopping Emberkeep (running servers are stopped properly first)…"
@@ -36,12 +44,13 @@ fi
 # The program folder belongs to the service user, so Emberkeep can install its own updates.
 install -m 755 -o "$SVC_USER" -g "$SVC_USER" "$HERE/emberkeep" "$PREFIX/emberkeep"
 install -m 644 "$HERE/emberkeep.service" /etc/systemd/system/emberkeep.service
-cat > /usr/local/bin/emberkeep-link <<'EOS'
-#!/bin/sh
-# Prints the link that signs you in to Emberkeep as the host (it changes each time Emberkeep starts).
-exec sudo -u emberkeep -H /opt/emberkeep/emberkeep link "$@"
-EOS
-chmod 755 /usr/local/bin/emberkeep-link
+rm -f /usr/local/bin/emberkeep-link # older versions' helper
+ln -sf "$PREFIX/emberkeep" /usr/local/bin/emberkeep
+if [ -d /usr/share/applications ]; then
+  install -m 644 "$HERE/emberkeep.desktop" /usr/share/applications/emberkeep.desktop
+  install -D -m 644 "$HERE/emberkeep.svg" /usr/share/icons/hicolor/scalable/apps/emberkeep.svg
+  command -v update-desktop-database >/dev/null 2>&1 && update-desktop-database -q /usr/share/applications || true
+fi
 
 systemctl daemon-reload
 systemctl enable --now emberkeep >/dev/null 2>&1 || systemctl enable --now emberkeep
@@ -56,7 +65,8 @@ if [ -f "$LINK_FILE" ]; then
   PORT=$(echo "$LINK" | sed -n 's#^http://127\.0\.0\.1:\([0-9]*\)/.*#\1#p')
   echo "Emberkeep is running."
   echo
-  echo "Sign in as the host with this link (it changes when Emberkeep restarts; get it again with: emberkeep-link):"
+  echo "On this computer, open Emberkeep from your apps menu. Or sign in as the host with this link"
+  echo "(it changes when Emberkeep restarts; get it again with: sudo emberkeep link):"
   echo "  $LINK"
   echo
   echo "On another computer, forward the port over SSH first, then open the link there:"

@@ -13,7 +13,7 @@ if systemctl list-unit-files emberkeep.service >/dev/null 2>&1; then
   echo "Stopping Emberkeep (running servers are stopped properly first)…"
   systemctl disable --now emberkeep 2>/dev/null || true
 fi
-rm -f /etc/systemd/system/emberkeep.service /usr/local/bin/emberkeep-link
+rm -f /etc/systemd/system/emberkeep.service /usr/local/bin/emberkeep-link /usr/local/bin/emberkeep   /usr/share/applications/emberkeep.desktop /usr/share/icons/hicolor/scalable/apps/emberkeep.svg
 systemctl daemon-reload 2>/dev/null || true
 rm -rf /opt/emberkeep
 

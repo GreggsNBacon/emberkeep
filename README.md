@@ -22,15 +22,16 @@ Just want the port forwarding? Watchfire has its own download in the [Watchfire 
 
 ### Linux (preview)
 
-For a dedicated server box: **Emberkeep-*version*-linux-x64.tar.gz** runs Emberkeep as a systemd service, and you use it from a browser. Same features, minus the Windows-only ones (the window and tray, Watchfire, Start with Windows, restarting the PC, Browse files).
+Emberkeep runs as a background service (it starts with the machine), with the same interface and features, minus the Windows-only ones (the tray, Start with Windows, restarting the PC, Browse files and the bundled Watchfire: on Linux Emberkeep opens ports with UPnP itself).
 
-```sh
-tar xzf Emberkeep-<version>-linux-x64.tar.gz
-cd emberkeep-<version>
-sudo ./install.sh
-```
+- **Ubuntu, Debian, Mint and others based on them:** download `emberkeep_<version>_amd64.deb` and run `sudo apt install ./emberkeep_<version>_amd64.deb` (or open it in your software installer).
+- **Any other Linux with systemd** (Fedora, Arch, openSUSE…): download `Emberkeep-<version>-linux-x64.tar.gz`, unpack it and run `sudo ./install.sh`.
 
-The installer prints a link that signs you in as the host. Emberkeep only listens on 127.0.0.1 at first, so from another computer forward the port over SSH (`ssh -L 8765:127.0.0.1:8765 you@server`) and open the link there; then create accounts and turn on remote access in App settings. `emberkeep-link` prints the link again. Installing game servers needs SteamCMD's 32-bit libraries (`sudo apt install lib32gcc-s1`). Enshrouded, V Rising, ARK: Survival Ascended, Sons of the Forest, Conan Exiles and Assetto Corsa EVO only have Windows servers. See `linux/README.txt` for more.
+**On a desktop**, open Emberkeep from the apps menu: it opens in its own window (with Chrome, Chromium, Edge, Brave or Vivaldi; otherwise a browser tab), signed in as the host. Whoever installed it is added to the `emberkeep` group that allows this; until their next login it asks for the password once.
+
+**On a server without a desktop**, Emberkeep only listens on 127.0.0.1 at first: forward the port over SSH (`ssh -L 8765:127.0.0.1:8765 you@server`) and open the link from `sudo emberkeep link` on your computer. Then create accounts and turn on remote access in App settings, so people can sign in from their browsers.
+
+Installing game servers needs SteamCMD's 32-bit libraries (`sudo apt install lib32gcc-s1`). Enshrouded, V Rising, ARK: Survival Ascended, Sons of the Forest, Conan Exiles and Assetto Corsa EVO only have Windows servers. More in [linux/README.txt](linux/README.txt). Watchfire has its own Linux packages in its repo.
 
 ## What it does
 
@@ -89,7 +90,7 @@ This produces:
 - `publish\Emberkeep.exe`: the app as a single self-contained file that doesn't need a separate .NET install. You can run it as-is.
 - `dist\Emberkeep-<version>-Setup.msi`: the installer to give to friends.
 
-For Linux, `.\build-linux.ps1` cross-compiles `dist\Emberkeep-<version>-linux-x64.tar.gz` (needs Node for the tarball).
+For Linux, `.\build-linux.ps1` cross-compiles `dist\emberkeep_<version>_amd64.deb` and `dist\Emberkeep-<version>-linux-x64.tar.gz` (needs Node, which writes the packages). It also runs on Linux with PowerShell; the [Linux workflow](.github/workflows/linux.yml) installs the .deb on Ubuntu and tests it.
 
 The window uses the Microsoft Edge WebView2 Runtime, which is built into Windows 11.
 

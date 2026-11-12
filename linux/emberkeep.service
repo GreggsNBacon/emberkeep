@@ -19,6 +19,8 @@ KillMode=mixed
 TimeoutStopSec=300
 Environment=DOTNET_BUNDLE_EXTRACT_BASE_DIR=/var/lib/emberkeep/.cache/dotnet
 LimitNOFILE=65536
+# New files: the emberkeep user and its group (the people allowed to manage Emberkeep), nobody else.
+UMask=0027
 
 [Install]
 WantedBy=multi-user.target

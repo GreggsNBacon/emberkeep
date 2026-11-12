@@ -1,0 +1,10 @@
+#!/bin/sh
+# Emberkeep .deb: stops the service before its files change. Emberkeep stops each game server properly first.
+set -e
+if [ -d /run/systemd/system ]; then
+  case "$1" in
+    remove|deconfigure) systemctl disable --now emberkeep >/dev/null 2>&1 || true ;;
+    upgrade) systemctl stop emberkeep || true ;;
+  esac
+fi
+exit 0

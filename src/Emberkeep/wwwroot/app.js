@@ -2345,7 +2345,7 @@ async function appSettingsDialog() {
         h('div', { class: 'set-rows' },
           h('div', { class: 'set-row' }, h('label', {}, 'Commands'),
             h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } },
-              'sudo systemctl status emberkeep · sudo systemctl restart emberkeep · sudo journalctl -u emberkeep -f · emberkeep-link')),
+              'sudo systemctl status emberkeep · sudo systemctl restart emberkeep · sudo journalctl -u emberkeep -f · emberkeep link')),
           h('div', { class: 'set-row' }, h('label', {}, 'Data folder'), h('div', { class: 'mono-path', style: { paddingTop: '8px', whiteSpace: 'normal' } }, st.dataDir)))),
       h('div', { class: 'set-group win-only' },
         h('h2', {}, 'Window and startup'),

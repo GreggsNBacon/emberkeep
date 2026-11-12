@@ -1,0 +1,77 @@
+# Builds the Linux packages and tests them on a real Ubuntu machine: installs the .deb, checks the service, signs in,
+# runs a custom server (start, console, stop with Ctrl+C), installs and runs Valheim through SteamCMD, then removes it.
+name: Linux
+
+on:
+  push:
+    branches: [linux]
+  pull_request:
+    paths: ['src/**', 'linux/**', 'build-linux.ps1', 'tests/linux/**', '.github/workflows/linux.yml']
+  workflow_dispatch:
+
+jobs:
+  build-and-test:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          fetch-depth: 0 # the version number counts commits
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0.x'
+      - uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+
+      - name: Build the Linux packages
+        shell: pwsh
+        run: ./build-linux.ps1
+
+      - name: Install the .deb
+        run: sudo apt-get install -y ./dist/emberkeep_*_amd64.deb
+
+      - name: The service runs and the installer's group can sign in
+        run: |
+          for i in $(seq 1 30); do sudo test -f /var/lib/emberkeep/.config/Emberkeep/sign-in-link.txt && break; sleep 1; done
+          systemctl is-active emberkeep
+          sudo stat -c '%a %U:%G %n' /var/lib/emberkeep /var/lib/emberkeep/.config/Emberkeep /var/lib/emberkeep/.config/Emberkeep/sign-in-link.txt
+          id runner
+          emberkeep version
+          # The person who installed it (sudo) was added to the emberkeep group, which can read the link.
+          sg emberkeep -c "emberkeep link" | grep -q '^http://127.0.0.1:'
+          # Others can't.
+          ! emberkeep link
+
+      - name: Smoke test (custom server, console, Ctrl+C, SteamCMD + Valheim)
+        run: |
+          sudo apt-get install -y lib32gcc-s1 lib32stdc++6
+          sudo -u emberkeep mkdir -p /var/lib/emberkeep/ci-server
+          printf '%s\n' '#!/bin/bash' \
+            'trap '"'"'echo "got SIGINT, saving"; exit 0'"'"' INT' \
+            'echo "server ready"' \
+            'while true; do if read -r -t 1 line; then echo "you said: $line"; fi; done' \
+            | sudo -u emberkeep tee /var/lib/emberkeep/ci-server/run.sh > /dev/null
+          sudo -u emberkeep chmod 644 /var/lib/emberkeep/ci-server/run.sh # Emberkeep should make it executable itself
+          node tests/linux/smoke.js "$(sudo emberkeep link)" /var/lib/emberkeep/ci-server --steamcmd /var/lib/emberkeep/servers/valheim
+
+      - name: Restart, then remove
+        run: |
+          sudo systemctl restart emberkeep
+          sleep 5
+          systemctl is-active emberkeep
+          sudo apt-get remove -y emberkeep
+          ! systemctl is-active emberkeep
+          sudo test -d /var/lib/emberkeep # settings and game servers stay
+
+      - name: Emberkeep's log
+        if: always()
+        run: sudo journalctl -u emberkeep --no-pager | tail -n 200
+
+      - uses: actions/upload-artifact@v4
+        if: always()
+        with:
+          name: linux-packages
+          path: |
+            dist/*.deb
+            dist/*-linux-x64.tar.gz
