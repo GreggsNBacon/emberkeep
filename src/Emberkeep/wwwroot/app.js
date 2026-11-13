@@ -830,7 +830,7 @@ async function openFile(f) {
     };
     renderEditor();
     renderFileList();
-    loadBackups();
+    loadConfigBackups();
   } catch (e) { toast(e.message, 'bad'); }
 }
 
@@ -1030,7 +1030,7 @@ async function saveFile(force = false) {
     ed.modified = r.modified;
     toast(r.backup ? `Saved ${ed.name}. The previous version is in Backups.` : `Saved ${ed.name}.`, 'good');
     renderEditor();
-    loadBackups();
+    loadConfigBackups();
     // The join port can live in a config file (server.properties, serverconfig.xml…), so refresh it.
     api('GET', `/api/servers/${s.id}/join`).then(j => { if (state.detail?.config.id === s.id) { state.detail.join = j; renderJoin(); } }).catch(() => { });
   } catch (e) {
@@ -1042,7 +1042,9 @@ async function saveFile(force = false) {
   }
 }
 
-async function loadBackups() {
+// The config editor's Backups dropdown (earlier copies of the open file). Not the server's Backups tab: that's
+// loadBackups in extras.js. Both once had the same name, and extras.js's (loaded second) replaced this one.
+async function loadConfigBackups() {
   const ed = state.editor, s = current();
   const sel = $('#backupSelect');
   sel.replaceChildren(h('option', { value: '' }, 'Backups'));
@@ -1058,7 +1060,7 @@ async function loadBackups() {
   } catch { }
 }
 
-async function loadBackup(name) {
+async function loadConfigBackup(name) {
   const ed = state.editor, s = current();
   if (!name || !ed) return;
   try {
@@ -2835,7 +2837,7 @@ function wire() {
     const ed = state.editor; if (!ed) return;
     ed.text = ed.original; ed.model = parseConfig(ed.format, ed.text); renderEditor();
   };
-  $('#backupSelect').onchange = e => loadBackup(e.target.value);
+  $('#backupSelect').onchange = e => loadConfigBackup(e.target.value);
   const ta = $('#textArea');
   ta.addEventListener('input', () => { state.editor.text = ta.value; updateGutter(); updateDirty(); });
   ta.addEventListener('scroll', () => { $('#gutter').scrollTop = ta.scrollTop; });
