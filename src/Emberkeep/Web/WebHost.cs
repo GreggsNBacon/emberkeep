@@ -255,6 +255,20 @@ public sealed class WebHost
             else { ctx.Response.StatusCode = 401; await ctx.Response.WriteAsJsonAsync(new { error = err }); }
             return;
         }
+        // First run: while there are no accounts, someone on this machine (or through an SSH tunnel, which arrives as
+        // 127.0.0.1) creates the owner account on the sign-in page. Nobody else can, and it's gone once an account exists.
+        if (path == "/auth/setup")
+        {
+            bool needed = Auth.UserCount == 0;
+            if (HttpMethods.IsGet(ctx.Request.Method)) { await ctx.Response.WriteAsJsonAsync(new { needed, allowed = needed && loopback }); return; }
+            if (!HttpMethods.IsPost(ctx.Request.Method)) { ctx.Response.StatusCode = 405; return; }
+            if (!loopback) { ctx.Response.StatusCode = 403; await ctx.Response.WriteAsJsonAsync(new { error = "Set Emberkeep up on the computer it runs on (or through an SSH tunnel)." }); return; }
+            var body = await ctx.Request.ReadFromJsonAsync<LoginRequest>();
+            var (session, err) = Auth.SetupFirstOwner(body?.Username ?? "", body?.Password ?? "");
+            if (session != null) { SetSessionCookie(ctx, session); await ctx.Response.WriteAsJsonAsync(new { ok = true }); }
+            else { ctx.Response.StatusCode = 400; await ctx.Response.WriteAsJsonAsync(new { error = err }); }
+            return;
+        }
         if (path == "/auth/logout")
         {
             Auth.EndSession(AuthService.SessionCookie(ctx));

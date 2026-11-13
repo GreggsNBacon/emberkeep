@@ -26,7 +26,8 @@ if [ "$1" = "configure" ]; then
   echo
   echo "Emberkeep is installed and running as the emberkeep service."
   echo "  On this computer: open Emberkeep from your apps menu."
-  echo "  Over SSH: ssh -L 8765:127.0.0.1:8765 you@this-server, then open the link from: sudo emberkeep link"
+  echo "  Or open http://127.0.0.1:8765 in a browser: the first time, it asks you to create your account."
+  echo "  From another computer: ssh -L 8765:127.0.0.1:8765 you@this-server, then open http://127.0.0.1:8765 there."
   if [ -n "${ADDED:-}" ]; then
     echo "  $ADDED was added to the emberkeep group (takes effect at the next login; until then Emberkeep asks for your password)."
   fi

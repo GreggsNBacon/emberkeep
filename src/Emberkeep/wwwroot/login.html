@@ -13,24 +13,64 @@
   <div class="brand"><img src="/favicon.svg" alt="" width="28" height="28"><span>Emberkeep</span></div>
   <h1>Sign in</h1>
   <p>Sign in with the account the host made for you.</p>
-  <div class="notice warn expired-note" id="expired" hidden>That link has expired: Emberkeep makes a new one each time it starts. On the PC running Emberkeep, use its window, or right-click its tray icon and choose <b>Open in browser</b>. On a Linux server, run <code>emberkeep link</code> there for the current link.</div>
+  <div class="notice warn expired-note" id="expired" hidden>That link has expired: Emberkeep makes a new one each time it starts. On the PC running Emberkeep, use its window, or right-click its tray icon and choose <b>Open in browser</b>. On a Linux server, run <code>sudo emberkeep link</code> there for the current link.</div>
+  <div class="notice warn" id="notSetUp" hidden>Emberkeep has no accounts yet. Open it on the computer it runs on to set it up (from a server without a desktop, use an SSH tunnel: <code>ssh -L 8765:127.0.0.1:8765 you@server</code>, then open http://127.0.0.1:8765 here).</div>
   <input class="input" id="user" type="text" autocomplete="username" aria-label="Username" placeholder="Username" autofocus required spellcheck="false" autocapitalize="off">
   <input class="input" id="pw" type="password" autocomplete="current-password" aria-label="Password" placeholder="Password" required>
   <button class="btn btn-primary" type="submit">Sign in</button>
   <div class="err" id="err" role="alert"></div>
 </form>
+
+<!-- First run without the desktop window (Linux, or a browser on the host): create the owner account here. -->
+<form class="login" id="setup" hidden>
+  <div class="brand"><img src="/favicon.svg" alt="" width="28" height="28"><span>Emberkeep</span></div>
+  <h1>Set up Emberkeep</h1>
+  <p>Create your account. It's the owner: it can do everything, and later you can add accounts for friends under App settings → Users &amp; groups.</p>
+  <input class="input" id="sUser" type="text" autocomplete="username" aria-label="Username" placeholder="Username" required spellcheck="false" autocapitalize="off" minlength="2" maxlength="32">
+  <input class="input" id="sPw" type="password" autocomplete="new-password" aria-label="Password" placeholder="Password (at least 8 characters)" required minlength="8">
+  <input class="input" id="sPw2" type="password" autocomplete="new-password" aria-label="Password again" placeholder="Password again" required minlength="8">
+  <button class="btn btn-primary" type="submit">Create account and sign in</button>
+  <div class="err" id="sErr" role="alert"></div>
+</form>
 <script>
 if (new URLSearchParams(location.search).has('expired')) document.getElementById('expired').hidden = false;
+const post = (url, body) => fetch(url, {
+  method: 'POST', credentials: 'same-origin',
+  headers: { 'Content-Type': 'application/json', 'X-Emberkeep': '1' },
+  body: JSON.stringify(body),
+});
+
+fetch('/auth/setup', { credentials: 'same-origin' }).then(r => r.json()).then(s => {
+  if (!s.needed) return;
+  if (s.allowed) {
+    document.getElementById('f').hidden = true;
+    document.getElementById('setup').hidden = false;
+    document.getElementById('expired').hidden = true;
+    document.title = 'Set up | Emberkeep';
+    document.getElementById('sUser').focus();
+  } else document.getElementById('notSetUp').hidden = false;
+}).catch(() => {});
+
+document.getElementById('setup').addEventListener('submit', async e => {
+  e.preventDefault();
+  const err = document.getElementById('sErr');
+  err.textContent = '';
+  const pw = document.getElementById('sPw').value;
+  if (pw !== document.getElementById('sPw2').value) { err.textContent = 'The passwords don\'t match.'; return; }
+  try {
+    const r = await post('/auth/setup', { username: document.getElementById('sUser').value, password: pw });
+    if (r.ok) { location.href = '/'; return; }
+    const d = await r.json().catch(() => ({}));
+    err.textContent = d.error || 'Setting up didn\'t work.';
+  } catch { err.textContent = 'Can\'t reach Emberkeep. Is it running?'; }
+});
+
 document.getElementById('f').addEventListener('submit', async e => {
   e.preventDefault();
   const err = document.getElementById('err');
   err.textContent = '';
   try {
-    const r = await fetch('/auth/login', {
-      method: 'POST', credentials: 'same-origin',
-      headers: { 'Content-Type': 'application/json', 'X-Emberkeep': '1' },
-      body: JSON.stringify({ username: document.getElementById('user').value, password: document.getElementById('pw').value }),
-    });
+    const r = await post('/auth/login', { username: document.getElementById('user').value, password: document.getElementById('pw').value });
     if (r.ok) { location.href = '/'; return; }
     const d = await r.json().catch(() => ({}));
     err.textContent = d.error || 'Sign-in failed.';

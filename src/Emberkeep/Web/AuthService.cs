@@ -82,6 +82,8 @@ public sealed class AuthService
     }
 
     public bool HasAccounts => S.Users.Any(u => !u.Disabled);
+    /// <summary>Accounts of any kind, disabled ones too (first-run setup is only for a truly empty list).</summary>
+    public int UserCount { get { lock (_lock) return S.Users.Count; } }
 
     /// <summary>Internet access is only allowed while every enabled account has a long password.</summary>
     public bool AllPasswordsLong => S.Users.Where(u => !u.Disabled).All(u => u.LongPassword) && HasAccounts;
@@ -149,6 +151,24 @@ public sealed class AuthService
             int count = (f.Until > DateTime.UtcNow ? f.Count : 0) + 1;
             return (count, DateTime.UtcNow + (count >= 5 ? lockFor : TimeSpan.FromMinutes(10)));
         });
+    }
+
+    /// <summary>
+    /// First run without the desktop window (Linux, or a browser on the host): creates the first account, an owner, and
+    /// signs it in. Only while there are no accounts at all; the caller allows it only from this machine (loopback).
+    /// </summary>
+    public (string? SessionId, string? Error) SetupFirstOwner(string username, string password)
+    {
+        UserAccount user;
+        lock (_lock)
+        {
+            if (S.Users.Count > 0) return (null, "Emberkeep is already set up. Sign in with your account.");
+            try { user = CreateUser(username, password, S.Groups.First(g => g.BuiltIn).Id); }
+            catch (ArgumentException ex) { return (null, ex.Message); }
+            user.LastSignIn = DateTime.UtcNow;
+        }
+        _mgr.Save();
+        return (NewSession(user.Id, user.SecurityStamp, TimeSpan.FromDays(30)), null);
     }
 
     public bool CheckLocalToken(string? token) =>

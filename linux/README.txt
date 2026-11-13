@@ -20,8 +20,10 @@ in as the host. Whoever installed it is added to the "emberkeep" group, which is
 (from their next login; until then it asks for the password). Add others with:
   sudo usermod -aG emberkeep <name>
 
-Emberkeep only listens on 127.0.0.1 until you turn on remote access, so on a server without a
-desktop, forward the port over SSH and open the link from "sudo emberkeep link" on your computer:
+The first time you open it, Emberkeep asks you to create your account (the owner). That only works
+from the computer it runs on: Emberkeep only listens on 127.0.0.1 until you turn on remote access.
+On a server without a desktop, forward the port over SSH and open http://127.0.0.1:8765 on your
+computer instead (an SSH tunnel counts as the same computer):
 
   ssh -L 8765:127.0.0.1:8765 you@your-server
 
@@ -29,7 +31,7 @@ Then, in App settings: create accounts (Users & groups) and turn on Allow remote
 sign in at http://<your server>:8765. Allow that port in your firewall (ufw, firewalld) if you have one.
 
   emberkeep open                         open Emberkeep in its own window (desktop)
-  sudo emberkeep link                    the host's sign-in link (changes each time Emberkeep starts)
+  sudo emberkeep link                    a sign-in link that needs no password (changes each time Emberkeep starts)
   sudo systemctl status emberkeep        is it running?
   sudo journalctl -u emberkeep -f        its output
   sudo systemctl restart emberkeep       restart it (servers are stopped properly first)

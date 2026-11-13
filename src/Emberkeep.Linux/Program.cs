@@ -82,8 +82,9 @@ internal static class Program
 #endif
         Console.WriteLine($"Emberkeep {UpdateChecker.CurrentVersion} is running on {host.LocalUrl}{(host.ListeningOnLan ? " and your network" : " (this machine only)")}.");
         Console.WriteLine($"Data: {ServerManager.DataDir}");
-        Console.WriteLine("Sign in as the host with the link from \"emberkeep link\". From another computer, forward the port over SSH first:");
-        Console.WriteLine($"  ssh -L {host.Port}:127.0.0.1:{host.Port} you@this-server   then open the link on that computer.");
+        Console.WriteLine($"Open {host.LocalUrl} on this computer: the first time, it asks you to create your account.");
+        Console.WriteLine("From another computer, forward the port over SSH first, then open the same address there:");
+        Console.WriteLine($"  ssh -L {host.Port}:127.0.0.1:{host.Port} you@this-server");
 
         _ = Task.Run(mgr.StartAutoServersAsync);
 

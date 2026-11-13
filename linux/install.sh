@@ -65,11 +65,10 @@ if [ -f "$LINK_FILE" ]; then
   PORT=$(echo "$LINK" | sed -n 's#^http://127\.0\.0\.1:\([0-9]*\)/.*#\1#p')
   echo "Emberkeep is running."
   echo
-  echo "On this computer, open Emberkeep from your apps menu. Or sign in as the host with this link"
-  echo "(it changes when Emberkeep restarts; get it again with: sudo emberkeep link):"
-  echo "  $LINK"
+  echo "Open Emberkeep from your apps menu, or open http://127.0.0.1:${PORT:-8765} in a browser on this computer:"
+  echo "the first time, it asks you to create your account."
   echo
-  echo "On another computer, forward the port over SSH first, then open the link there:"
+  echo "From another computer, forward the port over SSH first, then open http://127.0.0.1:${PORT:-8765} there:"
   echo "  ssh -L ${PORT:-8765}:127.0.0.1:${PORT:-8765} $(logname 2>/dev/null || echo you)@$(hostname)"
   echo
   echo "Then, in App settings: create accounts (Users & groups) and turn on Allow remote access,"

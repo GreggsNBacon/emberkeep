@@ -43,6 +43,16 @@ async function waitState(id, want, seconds) {
 }
 
 (async () => {
+  // First run: the sign-in page offers to create the owner account (from this machine only).
+  const st = await (await fetch(base + '/auth/setup')).json();
+  check(st.needed === true && st.allowed === true, 'first-run setup is offered on this machine', st);
+  const setup = await fetch(base + '/auth/setup', { method: 'POST', headers: { 'X-Emberkeep': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'owner', password: 'ci-password-1' }) });
+  check(setup.ok, 'the owner account can be created', setup.status);
+  const again = await fetch(base + '/auth/setup', { method: 'POST', headers: { 'X-Emberkeep': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'second', password: 'ci-password-2' }) });
+  check(again.status === 400, 'setup is closed once an account exists', again.status);
+  const login = await fetch(base + '/auth/login', { method: 'POST', headers: { 'X-Emberkeep': '1', 'Content-Type': 'application/json' }, body: JSON.stringify({ username: 'owner', password: 'ci-password-1' }) });
+  check(login.ok, 'the owner can sign in with the password', login.status);
+
   // Sign in with the host link.
   const r = await fetch(link, { redirect: 'manual' });
   cookie = (r.headers.get('set-cookie') || '').split(';')[0];
