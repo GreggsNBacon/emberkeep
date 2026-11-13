@@ -47,7 +47,22 @@ public static class GameExtras
 
     private static readonly GameExtra None = new([]);
 
-    public static GameExtra For(string gameId) => Map.TryGetValue(gameId, out var e) ? e : None;
+    /// <summary>Linux: where games keep their worlds (Unity and Epic use ~/.config; others ~/.local/share).</summary>
+    private static readonly Dictionary<string, string[]> LinuxSaves = new()
+    {
+        ["valheim"] = ["~/.config/unity3d/IronGate/Valheim/worlds_local"],
+        ["satisfactory"] = ["~/.config/Epic/FactoryGame/Saved/SaveGames"],
+        ["7dtd"] = ["~/.local/share/7DaysToDie/Saves"],
+        ["terraria"] = ["~/.local/share/Terraria/Worlds"],
+        ["corekeeper"] = ["~/.config/unity3d/Pugstorm/Core Keeper/DedicatedServer"],
+    };
+
+    public static GameExtra For(string gameId)
+    {
+        var e = Map.TryGetValue(gameId, out var x) ? x : None;
+        if (!Platform.IsWindows && LinuxSaves.TryGetValue(gameId, out var saves)) e = e with { SaveFolders = saves };
+        return e;
+    }
 
     /// <summary>The command that shows <paramref name="message"/> to players, or null when the game has none.</summary>
     public static string? BroadcastCommand(string gameId, string message)

@@ -68,14 +68,16 @@ public sealed class ServerInstaller
     public InstallJob Install(int appId, string title, string dir, string? gameId, string? name)
     {
         if (appId <= 0) throw new InvalidOperationException("Pick a game, or enter its Steam app ID.");
-        if (string.IsNullOrWhiteSpace(dir) || !Path.IsPathFullyQualified(dir)) throw new InvalidOperationException("Choose a full folder path, like D:\\Game Servers\\Palworld.");
+        if ((gameId != null ? GameCatalog.Get(gameId) : GameCatalog.BySteamAppId(appId)) is { WindowsOnly: true } wo)
+            throw new InvalidOperationException($"{wo.Name} has no Linux server, so Emberkeep can't install it here.");
+        if (string.IsNullOrWhiteSpace(dir) || !Path.IsPathFullyQualified(dir)) throw new InvalidOperationException($"Choose a full folder path, like {Platform.ExampleFolder("Palworld")}.");
         dir = Path.GetFullPath(dir.Trim());
         if (dir.Contains($"{Path.DirectorySeparatorChar}steamapps{Path.DirectorySeparatorChar}", StringComparison.OrdinalIgnoreCase))
             throw new InvalidOperationException("That folder is inside a Steam library, which Steam itself manages. Pick a folder outside it.");
         lock (_jobs)
             if (_jobs.Any(j => !j.Finished && j.Dir.Equals(dir, StringComparison.OrdinalIgnoreCase)))
                 throw new InvalidOperationException("Something is already being installed into that folder.");
-        if (_mgr.Runtimes.Any(r => Path.GetFullPath(r.Config.InstallDir).TrimEnd('\\').Equals(dir.TrimEnd('\\'), StringComparison.OrdinalIgnoreCase)))
+        if (_mgr.Runtimes.Any(r => Path.GetFullPath(r.Config.InstallDir).TrimEnd(Path.DirectorySeparatorChar).Equals(dir.TrimEnd(Path.DirectorySeparatorChar), StringComparison.OrdinalIgnoreCase)))
             throw new InvalidOperationException("A server in Emberkeep already uses that folder. Use Update server in its menu instead.");
         var root = Path.GetPathRoot(dir);
         if (root == null || !Directory.Exists(root)) throw new InvalidOperationException($"The drive {root} isn't available.");
@@ -226,8 +228,9 @@ public sealed class ServerInstaller
                         job.Message = "Connecting to Steam…";
                 };
                 using var watch = CancellationTokenSource.CreateLinkedTokenSource(ct);
-                var consoleLog = Path.Combine(Path.GetDirectoryName(SteamCmd.ExePath(_mgr.Settings))!, "logs", "console_log.txt");
+                var consoleLog = SteamCmd.ConsoleLogPath(_mgr.Settings);
                 long from = File.Exists(consoleLog) ? new FileInfo(consoleLog).Length : 0;
+                bool logExisted = File.Exists(consoleLog);
                 _ = Task.Run(async () =>
                 {
                     var acf = Path.Combine(job.Dir, "steamapps", $"appmanifest_{job.AppId}.acf");
@@ -235,6 +238,8 @@ public sealed class ServerInstaller
                     {
                         try
                         {
+                            // First run on Linux: the log appears only once SteamCMD starts, and maybe somewhere else.
+                            if (!logExisted && !File.Exists(consoleLog) && SteamCmd.ConsoleLogPath(_mgr.Settings) is var found && File.Exists(found)) { consoleLog = found; from = 0; logExisted = true; }
                             if (File.Exists(consoleLog))
                             {
                                 using var fs = new FileStream(consoleLog, FileMode.Open, FileAccess.Read, FileShare.ReadWrite | FileShare.Delete);
@@ -261,7 +266,9 @@ public sealed class ServerInstaller
                 if (!ok) throw new InvalidOperationException(SteamCmd.FailureReason(output, code));
                 // SteamCMD reports success even when Steam sent nothing (an app that needs an account that owns it).
                 if (job.Kind == "install" && !HasServerFiles(job.Dir))
-                    throw new InvalidOperationException("Steam didn't send any files: this server needs a Steam account that owns the game. Install it through Steam, then add its folder.");
+                    throw new InvalidOperationException(Platform.IsWindows
+                        ? "Steam didn't send any files: this server needs a Steam account that owns the game. Install it through Steam, then add its folder."
+                        : "Steam didn't send any files. Either this server has no Linux version, or it needs a Steam account that owns the game.");
 
                 job.State = InstallState.Finishing; job.Percent = 100; job.Message = "Setting the server up…";
                 if (job.Kind == "install") AddServer(job);

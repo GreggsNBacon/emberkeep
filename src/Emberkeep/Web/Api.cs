@@ -34,6 +34,7 @@ public static partial class Api
             return Results.Ok(new
             {
                 username = p.Username, isLocal = p.IsLocal, full = p.Full,
+                os = Platform.Name, // "windows" or "linux": the page hides what only Windows has
                 permissions = p.Full ? Permissions.All.Select(a => a.Id).ToList() : p.Perms.ToList(),
                 allServers = p.AllServers,
                 canAddServers = p.CanAnywhere(Permissions.Launch) && p.AllServers,
@@ -159,6 +160,7 @@ public static partial class Api
             if (rt == null) return Results.NotFound();
             var remote = ctx.Connection.RemoteIpAddress;
             if (remote == null || !System.Net.IPAddress.IsLoopback(remote)) return Error("Browse files only works on the PC that runs Emberkeep.");
+            if (!Platform.IsWindows) return Error("Browse files opens File Explorer, which is only on Windows.");
             var dir = rt.Config.InstallDir;
             if (!Directory.Exists(dir)) return Error($"The server folder can't be found: {dir}");
             System.Diagnostics.Process.Start(new System.Diagnostics.ProcessStartInfo("explorer.exe", $"\"{dir}\"") { UseShellExecute = true });
@@ -444,10 +446,13 @@ public static partial class Api
             {
                 if (string.IsNullOrWhiteSpace(path))
                 {
-                    var drives = DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => new FsEntry(d.Name, d.RootDirectory.FullName, true));
+                    // Linux: the home folder and the root, instead of every mount (/proc, /sys…).
+                    var drives = Platform.IsWindows
+                        ? DriveInfo.GetDrives().Where(d => d.IsReady).Select(d => new FsEntry(d.Name, d.RootDirectory.FullName, true)).ToList()
+                        : [new FsEntry("Home", Environment.GetFolderPath(Environment.SpecialFolder.UserProfile), true), new FsEntry("/", "/", true)];
                     return Results.Ok(new { path = "", parent = (string?)null, entries = drives });
                 }
-                var dir = new DirectoryInfo(Environment.ExpandEnvironmentVariables(path));
+                var dir = new DirectoryInfo(Platform.Path(path));
                 if (!dir.Exists) return Error("Folder not found.");
                 var entries = dir.EnumerateDirectories()
                     .Where(d => !d.Attributes.HasFlag(FileAttributes.Hidden) && !d.Attributes.HasFlag(FileAttributes.System))
@@ -456,7 +461,8 @@ public static partial class Api
                 if (files == true)
                 {
                     entries.AddRange(dir.EnumerateFiles()
-                        .Where(f => f.Extension is ".exe" or ".bat" or ".cmd" or ".jar" or ".EXE" or ".BAT")
+                        .Where(f => Platform.IsWindows ? f.Extension is ".exe" or ".bat" or ".cmd" or ".jar" or ".EXE" or ".BAT"
+                            : f.Extension is ".jar" || GameCatalog.ProgramsIn(f.DirectoryName!).Contains(f.FullName))
                         .OrderBy(f => f.Name, StringComparer.OrdinalIgnoreCase)
                         .Select(f => new FsEntry(f.Name, f.FullName, false)));
                 }
@@ -516,8 +522,15 @@ public static partial class Api
         api.MapPost("/update/check", async () => { await host.Updates.CheckAsync(); return Results.Ok(UpdateDto(mgr, host)); }).Full();
         api.MapPost("/update/install", async () =>
         {
-            try { await host.Updates.InstallAsync(); return Results.Ok(new { started = true }); }
+            try { await host.Updates.InstallAsync(); }
             catch (Exception ex) { return Error(ex.Message); }
+            if (!Platform.IsWindows)
+            {
+                // Linux: the new program is in place. Stop the servers properly and exit; systemd starts the new version.
+                _ = Task.Run(async () => { await Task.Delay(1000); await mgr.StopAllAsync(); Environment.Exit(0); });
+                return Results.Ok(new { started = true, restarting = true, underSystemd = UpdateChecker.UnderSystemd });
+            }
+            return Results.Ok(new { started = true });
         }).Full();
 
         // ---------- restart this PC (full access) ----------
@@ -577,7 +590,7 @@ public static partial class Api
             if (req.InstallRoot is string root)
             {
                 root = root.Trim().Trim('"');
-                if (root.Length > 0 && !Path.IsPathFullyQualified(root)) return Error(@"Choose a full folder path, like D:\Game Servers.");
+                if (root.Length > 0 && !Path.IsPathFullyQualified(root)) return Error($"Choose a full folder path, like {Platform.ExampleFolder()}.");
                 s.InstallRoot = root;
             }
             if (req.CheckForUpdates is bool updates)
@@ -799,7 +812,7 @@ public static partial class Api
 
     private static object GameDto(GameDefinition g) => new
     {
-        g.Id, g.Name, g.Badge, g.Color, g.SteamAppIds, g.SteamCmdAnonymous, g.ArtAppId, g.DefaultArguments, g.Notes, g.QuickCommands,
+        g.Id, g.Name, g.Badge, g.Color, g.SteamAppIds, g.SteamCmdAnonymous, g.WindowsOnly, g.ArtAppId, g.DefaultArguments, g.Notes, g.QuickCommands,
         commands = g.Commands, stop = g.Stop, g.StopCommands, g.LogFiles, g.ConfigFiles, g.DefaultRconPort,
     };
 

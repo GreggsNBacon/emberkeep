@@ -1,0 +1,11 @@
+[Desktop Entry]
+Type=Application
+Name=Emberkeep
+GenericName=Game server manager
+Comment=Run and manage your game servers
+Exec=/opt/emberkeep/emberkeep open
+Icon=emberkeep
+Terminal=false
+Categories=Game;Network;
+Keywords=server;game;steam;steamcmd;minecraft;valheim;palworld;
+StartupWMClass=Emberkeep

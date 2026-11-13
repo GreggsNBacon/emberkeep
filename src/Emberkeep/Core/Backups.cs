@@ -58,7 +58,7 @@ public sealed class BackupService
         foreach (var raw in s.BackupFolders ?? GameExtras.For(s.GameId).SaveFolders.ToList())
         {
             if (string.IsNullOrWhiteSpace(raw)) continue;
-            var expanded = Environment.ExpandEnvironmentVariables(raw.Trim());
+            var expanded = GameCatalog.OsPath(raw.Trim());
             var full = Path.GetFullPath(Path.IsPathRooted(expanded) ? expanded : Path.Combine(s.InstallDir, expanded));
             if (!seen.Add(full)) continue;
             list.Add(new BackupItem(i++, raw.Trim(), full, !File.Exists(full)));
@@ -193,7 +193,7 @@ public sealed class BackupService
                     {
                         var rel = e.FullName[prefix.Length..].Replace('/', Path.DirectorySeparatorChar);
                         var target = it.IsDir ? Path.GetFullPath(Path.Combine(it.Resolved, rel)) : it.Resolved;
-                        if (it.IsDir && !target.StartsWith(it.Resolved.TrimEnd('\\') + "\\", StringComparison.OrdinalIgnoreCase)) continue; // no "..\" escapes
+                        if (it.IsDir && !target.StartsWith(it.Resolved.TrimEnd(Path.DirectorySeparatorChar) + Path.DirectorySeparatorChar, Platform.IsWindows ? StringComparison.OrdinalIgnoreCase : StringComparison.Ordinal)) continue; // no "..\" escapes
                         Directory.CreateDirectory(Path.GetDirectoryName(target)!);
                         e.ExtractToFile(target, overwrite: true);
                     }

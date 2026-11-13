@@ -1,0 +1,39 @@
+#!/bin/sh
+# Emberkeep .deb: sets up the service user and starts the emberkeep service.
+set -e
+
+if [ "$1" = "configure" ]; then
+  if ! id emberkeep >/dev/null 2>&1; then
+    useradd --system --user-group --create-home --home-dir /var/lib/emberkeep --shell /usr/sbin/nologin emberkeep
+  fi
+  # Settings, game servers and the sign-in link: the emberkeep user, plus the people in its group.
+  install -d -o emberkeep -g emberkeep -m 750 /var/lib/emberkeep
+  chmod 750 /var/lib/emberkeep
+
+  # Whoever installed it (sudo apt install, or a graphical installer via pkexec) may manage it from their desktop.
+  WHO="${SUDO_USER:-}"
+  if [ -z "$WHO" ] && [ -n "${PKEXEC_UID:-}" ]; then WHO=$(getent passwd "$PKEXEC_UID" | cut -d: -f1); fi
+  if [ -n "$WHO" ] && [ "$WHO" != "root" ] && ! id -nG "$WHO" | tr ' ' '\n' | grep -qx emberkeep; then
+    usermod -aG emberkeep "$WHO" && ADDED="$WHO"
+  fi
+
+  if [ -d /run/systemd/system ]; then
+    systemctl daemon-reload
+    systemctl enable emberkeep >/dev/null 2>&1 || true
+    systemctl restart emberkeep || true
+  fi
+
+  echo
+  echo "Emberkeep is installed and running as the emberkeep service."
+  echo "  On this computer: open Emberkeep from your apps menu."
+  echo "  Or open http://127.0.0.1:8765 in a browser: the first time, it asks you to create your account."
+  echo "  From another computer: ssh -L 8765:127.0.0.1:8765 you@this-server, then open http://127.0.0.1:8765 there."
+  if [ -n "${ADDED:-}" ]; then
+    echo "  $ADDED was added to the emberkeep group (takes effect at the next login; until then Emberkeep asks for your password)."
+  fi
+  if ! dpkg -s lib32gcc-s1 >/dev/null 2>&1; then
+    echo "  To install game servers with SteamCMD, add its 32-bit libraries:"
+    echo "    sudo dpkg --add-architecture i386 && sudo apt update && sudo apt install lib32gcc-s1"
+  fi
+fi
+exit 0
