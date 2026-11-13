@@ -93,6 +93,13 @@ async function waitState(id, want, seconds) {
   log = await logText(id);
   check(log.includes('got SIGINT, saving'), 'stop sends Ctrl+C (SIGINT) so the server can save', log.slice(-500));
 
+  // Uninstall: deletes the server's folder and removes it from the list.
+  const un = await api('GET', `/api/servers/${id}/uninstall`);
+  check(un.method === 'delete' && !un.problem, 'uninstall would delete the folder', un);
+  const done = await api('POST', `/api/servers/${id}/uninstall`, { name: 'CI test server' });
+  check(done.how === 'deleted', 'uninstall deletes it', done);
+  check(!(await api('GET', '/api/servers')).some((s) => s.id === id), 'the server left the list');
+
   // A real game through SteamCMD (Linux tarball, steamcmd.sh, progress, install, start, stop).
   if (steamDir) {
     let job = await api('POST', '/api/install', { gameId: 'valheim', dir: steamDir, name: 'CI Valheim' });

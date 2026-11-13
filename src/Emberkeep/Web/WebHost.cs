@@ -33,11 +33,15 @@ public sealed class WebHost
         PcRestart = new PcRestart(mgr);
         Installer = new ServerInstaller(mgr);
         Backups = new BackupService(mgr);
+        Uninstaller = new ServerUninstaller(mgr, id => Installer.Busy(id) || Backups.Busy(id), () => Backups.Root);
         Scheduler = new Scheduler(mgr, Backups, Installer);
         Notifier = new Notifier(mgr);
         Addresses = new PublicAddressWatcher(mgr);
         Scheduler.Warning += Discord.OnScheduledWarning;
     }
+
+    /// <summary>Uninstalls servers (through Steam, or by deleting their folder).</summary>
+    public ServerUninstaller Uninstaller { get; }
 
     /// <summary>Server backups (Backups tab).</summary>
     public BackupService Backups { get; }

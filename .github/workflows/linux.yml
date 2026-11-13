@@ -54,6 +54,8 @@ jobs:
             | sudo -u emberkeep tee /var/lib/emberkeep/ci-server/run.sh > /dev/null
           sudo -u emberkeep chmod 644 /var/lib/emberkeep/ci-server/run.sh # Emberkeep should make it executable itself
           node tests/linux/smoke.js "$(sudo emberkeep link)" /var/lib/emberkeep/ci-server --steamcmd /var/lib/emberkeep/servers/valheim
+          # The smoke test uninstalled the custom server: its folder must be gone.
+          ! sudo test -e /var/lib/emberkeep/ci-server
 
       - name: Restart, then remove
         run: |
