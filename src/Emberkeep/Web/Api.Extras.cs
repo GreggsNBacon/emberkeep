@@ -211,6 +211,27 @@ public static partial class Api
             return Results.Ok(new { server = Detail(added, WebHost.Who(ctx)) });
         }).Need(Permissions.Launch);
 
+        // ---------- uninstall (owners only: it deletes files) ----------
+
+        // What uninstalling would do: through Steam, delete the folder, or just remove the entry; its size; and why not.
+        api.MapGet("/servers/{id}/uninstall", (string id) =>
+            mgr.Get(id) is { } rt ? Results.Ok(host.Uninstaller.Info(rt)) : Results.NotFound()).Full();
+
+        api.MapPost("/servers/{id}/uninstall", async (string id, UninstallRequest req, HttpContext ctx) =>
+        {
+            if (mgr.Get(id) is not { } rt) return Results.NotFound();
+            // Deleting files needs the server's name typed in, so a stray click can't do it.
+            if (!string.Equals((req.Name ?? "").Trim(), rt.Config.Name.Trim(), StringComparison.OrdinalIgnoreCase))
+                return Error("Type the server's name exactly to confirm.");
+            try
+            {
+                var how = await host.Uninstaller.UninstallAsync(rt, Actor(ctx));
+                if (how != "steam") host.Auth.ForgetServer(id);
+                return Results.Ok(new { how });
+            }
+            catch (InvalidOperationException ex) { return Error(ex.Message); }
+        }).Full();
+
         // ---------- export / import ----------
 
         // The server list (with their settings and schedules) as a file, e.g. to move Emberkeep to another PC.
@@ -255,4 +276,5 @@ public static partial class Api
     private sealed record BackupSettingsRequest(List<string>? Folders, int? Keep, bool? OnStop);
     private sealed record DuplicateRequest(string? Name, string? Dir, bool CopyFiles);
     private sealed record ImportRequest(List<ServerInstance>? Servers);
+    private sealed record UninstallRequest(string? Name);
 }

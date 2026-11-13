@@ -1429,7 +1429,9 @@ function renderSettings() {
     h('h2', {}, 'Remove'),
     h('div', { class: 'set-rows danger-zone' },
       row('Remove from Emberkeep', h('button', { class: 'btn btn-danger', type: 'button', onclick: removeServer }, 'Remove server'),
-        'Only removes it from this list. The server\'s files stay on disk.'))));
+        'Only removes it from this list. The server\'s files stay on disk.'),
+      state.me?.full ? row('Uninstall', h('button', { class: 'btn btn-danger', type: 'button', onclick: uninstallDialog }, 'Uninstall server'),
+        'Removes it and deletes its files: through Steam if Steam installed it. Emberkeep\'s backups are kept.') : null)));
 
   form.append(h('div', { class: 'set-actions' },
     h('button', { class: 'btn btn-primary', type: 'submit' }, 'Save settings'),
@@ -1466,6 +1468,8 @@ function serverMenu(anchor) {
   items.push({ label: 'Copy folder path', sub: s.installDir, onClick: () => copyText(s.installDir, 'Copied the folder path.') });
   if (can('launch')) items.push('sep', { label: 'Remove server', danger: true, disabled: !stopped,
     sub: stopped ? 'From Emberkeep only: its files stay on disk' : 'Stop the server first', onClick: removeServer });
+  if (state.me?.full) items.push({ label: 'Uninstall server', danger: true, disabled: !stopped,
+    sub: stopped ? 'Remove it and delete its files (through Steam if Steam installed it)' : 'Stop the server first', onClick: uninstallDialog });
   openMenu(anchor, items, { plain: true });
 }
 
@@ -1536,6 +1540,47 @@ async function removeServer() {
     state.selectedId = null; state.detail = null;
     toast(`Removed ${s.name}.`);
   } catch (e) { toast(e.message, 'bad'); }
+}
+
+// Uninstall: through Steam for games Steam installed, otherwise Emberkeep deletes the folder. The server's name has to be
+// typed to confirm, because files are deleted. Emberkeep's own backups of the server are kept.
+async function uninstallDialog() {
+  const s = current();
+  if (!s) return;
+  const body = h('div', {}, h('p', { class: 'dim' }, 'Checking the server\'s folder…'));
+  const nameInput = h('input', { class: 'input', type: 'text', placeholder: s.name, autocomplete: 'off', spellcheck: 'false', 'aria-label': 'Server name' });
+  const go = h('button', { class: 'btn btn-danger', type: 'button', disabled: true }, 'Uninstall');
+  const m = openModal({ title: `Uninstall ${s.name}?`, body, small: true,
+    foot: [h('button', { class: 'btn btn-ghost', type: 'button', onclick: () => m.close() }, 'Cancel'), go] });
+  let info;
+  try { info = await api('GET', `/api/servers/${s.id}/uninstall`); }
+  catch (e) { body.replaceChildren(h('div', { class: 'notice warn' }, e.message)); return; }
+  const size = info.bytes != null ? `${info.sizeIsPartial ? 'at least ' : ''}${fmtBytes(info.bytes)}` : null;
+  const what = info.method === 'steam'
+    ? [h('p', {}, `Steam installed ${info.steamName || 'this server'}, so Steam uninstalls it: Steam asks you to confirm on the host PC${size ? `, then frees ${size}` : ''}. Once its files are gone, Emberkeep removes the server from the list.`)]
+    : info.method === 'remove'
+      ? [h('p', {}, 'The server\'s folder is already gone, so this only removes it from Emberkeep.')]
+      : [h('p', {}, 'This permanently deletes the server\'s folder and everything in it (game files, worlds, config files), then removes it from Emberkeep. It doesn\'t go to the Recycle Bin.'),
+         h('div', { class: 'mono-path', style: { whiteSpace: 'normal', wordBreak: 'break-all', overflow: 'visible', textOverflow: 'clip', margin: '8px 0' } }, info.dir + (size ? `  (${size})` : ''))];
+  const parts = [...what, h('p', { class: 'dim' }, 'Emberkeep\'s backups of this server are kept (Backups tab, or the backup folder), so you can still get a world back.')];
+  if (info.problem) {
+    parts.push(h('div', { class: 'notice warn' }, info.problem));
+  } else {
+    parts.push(h('label', { class: 'dim', style: { display: 'block', margin: '12px 0 6px' } }, `Type ${s.name} to confirm`), nameInput);
+    nameInput.addEventListener('input', () => { go.disabled = nameInput.value.trim().toLowerCase() !== s.name.trim().toLowerCase(); });
+    setTimeout(() => nameInput.focus(), 50);
+  }
+  body.replaceChildren(...parts);
+  go.textContent = info.method === 'steam' ? 'Uninstall with Steam' : info.method === 'remove' ? 'Remove' : 'Delete and uninstall';
+  go.onclick = async () => {
+    go.disabled = true; go.textContent = info.method === 'delete' ? 'Deleting…' : 'Working…';
+    try {
+      const r = await api('POST', `/api/servers/${s.id}/uninstall`, { name: nameInput.value });
+      m.close();
+      if (r.how === 'steam') toast(`Confirm in Steam on the host PC. ${s.name} leaves the list once Steam has uninstalled it.`, 'good');
+      else { state.selectedId = null; state.detail = null; toast(r.how === 'deleted' ? `Uninstalled ${s.name} and deleted its files.` : `Removed ${s.name}.`, 'good'); }
+    } catch (e) { toast(e.message, 'bad'); go.disabled = false; go.textContent = 'Try again'; }
+  };
 }
 
 // ---------------- add server ----------------
